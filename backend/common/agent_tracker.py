@@ -67,11 +67,24 @@ class AgentResponse:
         return asdict(self)
 
 
+@dataclass
+class SkillCallEvent:
+    """Skill 调用事件"""
+    skill_name: str  # skill 名称，如 "code-review", "audit-log-normalization"
+    agent_name: str  # 调用该 skill 的 agent
+    agent_type: str  # agent 类型: coder, sre
+    task_summary: str  # 任务摘要
+    timestamp: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
 class AgentTracker:
     """
     代理跟踪器
 
-    跟踪 multi-agent 系统中的所有委托事件、工具调用和代理响应。
+    跟踪 multi-agent 系统中的所有委托事件、理响应。工具调用和代
     """
 
     def __init__(self, session_id: str):
@@ -79,6 +92,7 @@ class AgentTracker:
         self.delegations: List[DelegationEvent] = []
         self.tool_calls: List[ToolCallEvent] = []
         self.responses: List[AgentResponse] = []
+        self.skill_calls: List[SkillCallEvent] = []  # 新增：skill 调用记录
         self.start_time = datetime.now()
 
         logger.info("=" * 80)
@@ -172,6 +186,32 @@ class AgentTracker:
         logger.info(f"{icon} [AgentTracker] 📝 内容长度: {len(content)} 字符")
         logger.info("")
 
+    def log_skill_call(
+        self,
+        skill_name: str,
+        agent_name: str,
+        agent_type: str,
+        task_summary: str
+    ):
+        """记录 skill 调用事件"""
+        event = SkillCallEvent(
+            skill_name=skill_name,
+            agent_name=agent_name,
+            agent_type=agent_type,
+            task_summary=task_summary,
+            timestamp=datetime.now().isoformat()
+        )
+        self.skill_calls.append(event)
+
+        # 输出 skill 调用日志
+        icon = self._get_skill_icon(skill_name)
+        logger.info("")
+        logger.info(f"{icon} [AgentTracker] 🎨 Skill 调用")
+        logger.info(f"{icon} [AgentTracker] 📦 Skill: {skill_name}")
+        logger.info(f"{icon} [AgentTracker] 👤 Agent: {agent_name} ({agent_type})")
+        logger.info(f"{icon} [AgentTracker] 📋 任务: {task_summary[:100]}...")
+        logger.info("")
+
     def log_session_start(self, user_input: str):
         """记录会话开始"""
         logger.info("")
@@ -194,6 +234,7 @@ class AgentTracker:
         logger.info(f"🎊 [AgentTracker] ⏱️  总耗时: {duration:.2f} 秒")
         logger.info(f"🎊 [AgentTracker] 🔄 委托次数: {len(self.delegations)}")
         logger.info(f"🎊 [AgentTracker] ⚙️  工具调用: {len(self.tool_calls)}")
+        logger.info(f"🎊 [AgentTracker] 🎨 Skill 调用: {len(self.skill_calls)}")
         logger.info(f"🎊 [AgentTracker] 💬 响应数量: {len(self.responses)}")
         logger.info("🎊 " + "=" * 76)
         logger.info("")
@@ -205,9 +246,11 @@ class AgentTracker:
             "duration": (datetime.now() - self.start_time).total_seconds(),
             "delegation_count": len(self.delegations),
             "tool_call_count": len(self.tool_calls),
+            "skill_call_count": len(self.skill_calls),  # 新增
             "response_count": len(self.responses),
             "delegations": [d.to_dict() for d in self.delegations],
             "tool_calls": [t.to_dict() for t in self.tool_calls],
+            "skill_calls": [s.to_dict() for s in self.skill_calls],  # 新增
             "responses": [r.to_dict() for r in self.responses],
         }
 
@@ -274,6 +317,19 @@ class AgentTracker:
                     message_index=i
                 )
 
+                # 如果是子代理（coder 或 sre），检测并记录使用的 skill
+                if agent_type in ["coder", "sre"]:
+                    skill_name = self._detect_skill_from_content(msg.content, agent_type)
+                    if skill_name:
+                        # 生成任务摘要（取前100个字符）
+                        task_summary = msg.content[:100]
+                        self.log_skill_call(
+                            skill_name=skill_name,
+                            agent_name=agent_name,
+                            agent_type=agent_type,
+                            task_summary=task_summary
+                        )
+
     def _format_agent_name(self, name: str) -> str:
         """格式化代理名称"""
         agent_icons = {
@@ -295,24 +351,49 @@ class AgentTracker:
         return icons.get(agent_type, "🤖")
 
     def _detect_agent_type(self, content: str) -> str:
-        """从内容中检测代理类型"""
-        import re
+        """从内容中检测代理类型
 
-        # 更灵活的匹配模式 - 匹配各种可能的格式
-        patterns = [
-            # Coder Agent - 匹配各种图标和格式
-            (r"coder[ -]agent", "coder"),
-            # SRE Agent
-            (r"sre[ -]agent", "sre"),
-        ]
+        关键区分：
+        - 子代理签名：在开头，格式 "emoji **Agent Name**: 内容"（冒号后紧跟内容）
+        - Orchestrator 介绍：提到子代理但不是签名，如列表格式 "1. **emoji Agent Name** - 描述"
+        """
+        import re
 
         content_lower = content.lower()
 
-        for pattern, agent_type in patterns:
-            if re.search(pattern, content_lower):
-                return agent_type
+        # 先检测 Orchestrator 的特征（更优先，避免误判）
+        # 如果包含这些介绍性关键词，很可能是 Orchestrator 在介绍系统
+        orchestrator_indicators = [
+            r"orchestrator\s*agent",
+            r"协调以下专家",
+            r"协调.*专家.*agent",
+            r"我会.*委托",
+            r"请告诉我.*需要",
+        ]
 
-        # 默认返回 orchestrator（因为这是主代理，没有明确标识说明是它直接回答的）
+        for indicator in orchestrator_indicators:
+            if re.search(indicator, content_lower):
+                return "orchestrator"
+
+        # 检测子代理的签名响应 - 必须在开头且是签名格式
+        # 子代理签名格式：开头60字符内，emoji + **Agent Name**: 后面直接跟内容
+        # 关键：冒号后要么换行，要么紧跟内容（不是列表格式）
+
+        # Coder Agent 签名：必须在开头，且有冒号，后面不是" - "（列表格式）
+        coder_sig_pattern = r"^[\s\S]{0,60}👨‍💻\s*\*\*\s*coder[ -]agent\s*\*\*\s*:(?!.*\s-\s)"
+        if re.search(coder_sig_pattern, content_lower):
+            return "coder"
+
+        # SRE Agent 签名
+        sre_sig_pattern = r"^[\s\S]{0,60}🔧\s*\*\*\s*sre[ -]agent\s*\*\*\s*:(?!.*\s-\s)"
+        if re.search(sre_sig_pattern, content_lower):
+            return "sre"
+
+        # 检查是否是 Orchestrator 的汇总（包含 "Agent 完成"）
+        if re.search(r"agent\s+完成|完成\s*任务", content_lower):
+            return "orchestrator"
+
+        # 默认返回 orchestrator
         return "orchestrator"
 
     def _get_agent_name_from_type(self, agent_type: str) -> str:
@@ -324,3 +405,102 @@ class AgentTracker:
             "unknown": "Unknown Agent",
         }
         return names.get(agent_type, "Unknown")
+
+    def _get_skill_icon(self, skill_name: str) -> str:
+        """获取 skill 图标"""
+        icons = {
+            # Coder skills
+            "code-generation": "✨",
+            "code-optimization": "⚡",
+            "code-review": "🔍",
+            # SRE skills
+            "log-analysis": "📊",
+            "deployment": "🚀",
+            "sql-audit": "🗄️",
+            "audit-log-normalization": "📋",
+            "sre-operations": "🔧",
+        }
+        return icons.get(skill_name, "🎨")
+
+    def _detect_skill_from_content(self, content: str, agent_type: str) -> str:
+        """从内容中检测使用的 skill
+
+        Args:
+            content: 子代理的响应内容
+            agent_type: agent 类型 (coder, sre)
+
+        Returns:
+            检测到的 skill 名称，如果未检测到返回空字符串
+        """
+        import re
+
+        content_lower = content.lower()
+
+        # 定义每个 agent 的 skill 检测模式
+        skill_patterns = {
+            "coder": {
+                "code-generation": [
+                    r"create.*implementation",
+                    r"write.*code",
+                    r"implement",
+                    r"生成.*代码",
+                    r"编写.*实现",
+                ],
+                "code-optimization": [
+                    r"optimi[sz]e",
+                    r"refactor",
+                    r"improve.*performance",
+                    r"优化",
+                    r"重构",
+                ],
+                "code-review": [
+                    r"review",
+                    r"audit.*code",
+                    r"代码审查",
+                    r"代码审核",
+                ],
+            },
+            "sre": {
+                "log-analysis": [
+                    r"log.*analy[sz]is",
+                    r"analy[sz]e.*log",
+                    r"日志.*分析",
+                    r"分析.*日志",
+                ],
+                "deployment": [
+                    r"deplo[y]",
+                    r"release",
+                    r"部署",
+                    r"发布",
+                ],
+                "sql-audit": [
+                    r"sql.*audit",
+                    r"query.*review",
+                    r"sql.*优化",
+                    r"sql.*审核",
+                ],
+                "audit-log-normalization": [
+                    r"audit.*log.*normali[zs]ation",
+                    r"normali[zs]e.*audit",
+                    r"接口.*规范",
+                    r"接口.*标准化",
+                    r"audit.*log",
+                ],
+                "sre-operations": [
+                    r"operation",
+                    r"infrastructure",
+                    r"运维",
+                ],
+            },
+        }
+
+        # 获取当前 agent 的 skill 模式
+        agent_skills = skill_patterns.get(agent_type, {})
+
+        # 检测匹配的 skill
+        for skill_name, patterns in agent_skills.items():
+            for pattern in patterns:
+                if re.search(pattern, content_lower):
+                    return skill_name
+
+        return ""  # 未检测到具体 skill

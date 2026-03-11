@@ -37,6 +37,8 @@ class AgentMetadata(BaseModel):
     agent_type: str | None = None  # agent 类型：orchestrator, coder, sre
     delegations: int = 0  # 委托次数
     tool_calls: int = 0  # 工具调用次数
+    skill_calls: int = 0  # skill 调用次数
+    skills: list[str] = []  # 使用的 skill 名称列表
     duration: float = 0.0  # 耗时（秒）
 
 
@@ -180,10 +182,17 @@ async def chat(request: ChatRequest):
 
             # 提取 tracker_summary 并转换为 agent_metadata
             tracker_summary = result.get("tracker_summary", {})
+
+            # 提取 skill 名称列表
+            skill_calls_data = tracker_summary.get("skill_calls", [])
+            skill_names = [call.get("skill_name", "") for call in skill_calls_data if call.get("skill_name")]
+
             agent_metadata = AgentMetadata(
                 agent_type=result.get("agent"),  # orchestrator, coder, sre
                 delegations=tracker_summary.get("delegation_count", 0),
                 tool_calls=tracker_summary.get("tool_call_count", 0),
+                skill_calls=tracker_summary.get("skill_call_count", 0),
+                skills=skill_names,
                 duration=tracker_summary.get("duration", 0.0)
             )
 

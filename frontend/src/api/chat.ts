@@ -15,6 +15,8 @@ export interface AgentMetadata {
   agent_type?: string  // agent 类型：orchestrator, coder, sre, unknown
   delegations: number  // 委托次数
   tool_calls: number  // 工具调用次数
+  skill_calls: number  // skill 调用次数
+  skills: string[]  // 使用的 skill 名称列表
   duration: number  // 耗时（秒）
 }
 

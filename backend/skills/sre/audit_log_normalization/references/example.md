@@ -146,6 +146,34 @@ get_user_list
 
 ---
 
+## 示例 6.1: Query 动词映射（重要）
+
+### 输入
+```
+query ai gateway list
+```
+
+### 分析过程
+1. **识别非标准动词**: Query → 必须映射到标准动词
+2. **判断查询类型**: "list" 表明获取列表 → **List**（而非 Query）
+3. **识别服务模块**: ai gateway → **AI Gateway**（标准服务名）
+4. **识别资源对象**: list → 隐含对网关资源的查询，资源即服务本身
+
+### 规则应用
+- **非标准动词映射**: Query → **List**（根据上下文判断：list → List）
+- **服务规则**: ai gateway → AI Gateway（标准服务名，保持完整）
+- **资源规则**: 查询网关列表，资源即服务本身
+
+### 🚫 常见错误
+- ❌ `Query AI Gateway List` - Query 不是标准动词
+- ❌ `Get Gateway List` - 获取列表应该用 List，而非 Get
+- ❌ `List Gateway` - 缺少 AI，标准服务名是 "AI Gateway"
+
+### 规范化输出
+**标准接口行为描述**: `List AI Gateway`
+
+---
+
 ## 示例 7: 挂载资源操作
 
 ### 输入
@@ -365,6 +393,8 @@ start_ecs_server
 | `delete-oss-bucket` | 连字符 | `Delete BMC Bucket` |
 | `update_rds_spec` | 非标准服务名+动词选择 | `Modify DB InstanceSpec` |
 | `get_user_list` | 动词选择错误 | `List IAM User` |
+| `query ai gateway list` | 非标准动词 Query | `List AI Gateway` |
+| `Query AI Gateway List` | Query+非标准格式 | `List AI Gateway` |
 | `make_server` | 非标准动词+服务名 | `Create ZEC Instance` |
 | `Create-ZEC-Instance` | 连字符分隔 | `Create ZEC Instance` |
 | `CREATE ZEC INSTANCE` | 全大写 | `Create ZEC Instance` |
@@ -379,6 +409,7 @@ start_ecs_server
 | VPC / 网络 | Network | 网络服务 |
 | IAM / 身份认证 / 权限 | IAM | 身份管理 |
 | Monitor / 监控 | Monitor | 监控服务 |
+| AI Gateway / API Gateway / Gateway | AI Gateway | API 网关服务 |
 
 ### 标准动词选择表
 

@@ -86,6 +86,27 @@
 | **Check** | 检查状态/可用性 | 布尔值判断 | `Check ZEC InstanceName` |
 | **Verify** | 验证配置/权限 | 确认类操作 | `Verify IAM UserPermission` |
 
+#### 3.4.1 常见非标准动词映射
+
+**以下动词必须映射到标准查询动词**：
+
+| 非标准动词 | 应映射为 | 映射规则 | 示例 |
+|---|---|---|---|
+| Query | List/Describe | 获取列表→List，获取详情→Describe | `query user list` → `List IAM User` |
+| Search | List | 搜索即查询列表 | `search user` → `List IAM User` |
+| Find | List/Describe | 查找即查询 | `find user by id` → `Describe IAM User` |
+| Fetch | Get | 获取特定值 | `fetch config` → `Get IAM Config` |
+| Retrieve | List/Get | 检索数据 | `retrieve users` → `List IAM User` |
+| Show | Describe | 展示详情 | `show user info` → `Describe IAM User` |
+| View | Describe | 查看详情 | `view user details` → `Describe IAM User` |
+| Read | Get | 读取数据 | `read config` → `Get IAM Config` |
+
+**🚫 关键规则**：
+- **"Query" 永远不应作为最终 Action**，必须根据上下文映射到 List/Describe/Get
+- 如果是获取列表/集合，使用 **List**
+- 如果是获取单个对象详情，使用 **Describe**
+- 如果是获取特定属性值，使用 **Get**
+
 ### 3.5 管理类 (Management)
 
 | Action | 使用场景 | 判断依据 | 示例 |
@@ -132,18 +153,19 @@
 
 ## 4. 服务名称映射 (Service Name Mapping)
 
-| 原始名称 | 标准名称 | 说明 |
-|---|---|---|
+| 原始名称 | 标准名称 | 说明                           |
+|---|---|------------------------------|
 | ECS, 云服务器, VM, Server, 云主机, EC2 | **ZEC** | 云服务器 (Zcloud Elastic Compute) |
-| RDS, 数据库, DB, MySQL, PostgreSQL, Database | **DB** | 数据库服务 |
+| RDS, 数据库, DB, MySQL, PostgreSQL, Database | **DB** | 数据库服务                        |
 | OSS, 存储, 对象存储, Object Storage, S3, Bucket | **BMC** | 对象存储 (Bucket Management Cloud) |
-| VPC, 网络, Network, Virtual Private Cloud | **Network** | 网络服务 |
-| IAM, 权限, Permission, 身份认证, Identity, Access | **IAM** | 身份管理 |
-| Monitor, 监控, Monitoring | **Monitor** | 监控服务 |
-| Billing, 计费, 账单, Account | **Billing** | 计费服务 |
-| Security, 安全, Security Group | **Security** | 安全服务 |
-| SLB, Load Balancer, 负载均衡 | **SLB** | 负载均衡 |
-| CDN, Content Delivery Network | **CDN** | 内容分发网络 |
+| VPC, 网络, Network, Virtual Private Cloud | **Network** | 网络服务                         |
+| IAM, 权限, Permission, 身份认证, Identity, Access | **IAM** | 身份管理                         |
+| Monitor, 监控, Monitoring | **Monitor** | 监控服务                         |
+| Billing, 计费, 账单, Account | **Billing** | 计费服务                         |
+| Security, 安全, Security Group | **Security** | 安全服务                         |
+| SLB, Load Balancer, 负载均衡 | **SLB** | 负载均衡                         |
+| CDN, Content Delivery Network | **CDN** | 内容分发网络                       |
+| AI | **AI** | AI                           |
 
 ---
 
@@ -153,14 +175,14 @@
 
 | 原始名称 | 标准名称 | 说明 |
 |---|---|---|
-| instance, server, vm, 主机, 服务器 | **Instance** | 使用单数形式 |
-| disk, volume, 存储, 磁盘 | **DiskStorage** | 复合资源 |
-| bucket, object | **Bucket** | 对象存储容器 |
-| security group, sg, 安全组 | **SecurityGroup** | 复合资源 |
-| user, 用户 | **User** | |
-| policy, 策略 | **Policy** | |
-| role, 角色 | **Role** | |
-| group, 组 | **Group** | |
+   | instance, server, vm, 主机, 服务器 | **Instance** | 使用单数形式 |
+   | disk, volume, 存储, 磁盘 | **DiskStorage** | 复合资源 |
+   | bucket, object | **Bucket** | 对象存储容器 |
+   | security group, sg, 安全组 | **SecurityGroup** | 复合资源 |
+   | user, 用户 | **User** | |
+   | policy, 策略 | **Policy** | |
+   | role, 角色 | **Role** | |
+   | group, 组 | **Group** | |
 
 ### 5.2 复合资源 (PascalCase)
 

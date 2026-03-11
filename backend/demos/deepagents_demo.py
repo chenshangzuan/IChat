@@ -22,18 +22,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# Agent 标识模式（用于识别哪个 agent 在回复）
-AGENT_PATTERNS = {
-    "orchestrator": r"🎯\s*\*\*Orchestrator\*\*(?:完成)?",
-    "coder": r"👨‍💻\s*\*\*Coder[ -]Agent\*\*(?:完成)?",
-    "sre": r"🔧\s*\*\*SRE[ -]Agent\*\*(?:完成)?",
-    "delegating": r"🎯\s*\*\*Delegating to",
-}
-
-
 def detect_agent(response: str) -> str:
     """
     从响应中检测是哪个 agent 在回复
+
+    与 AgentTracker._detect_agent_type() 保持一致的逻辑
 
     Args:
         response: Agent 响应文本
@@ -44,20 +37,38 @@ def detect_agent(response: str) -> str:
     """
     import re
 
-    # 首先尝试精确模式匹配
-    for agent_type, pattern in AGENT_PATTERNS.items():
-        if re.search(pattern, response, re.IGNORECASE):  # 忽略大小写
-            return agent_type
-
-    # 如果精确匹配失败，使用更灵活的匹配
     response_lower = response.lower()
 
-    if "coder" in response_lower and "agent" in response_lower:
+    # 先检测 Orchestrator 的特征（更优先，避免误判）
+    # 如果包含这些介绍性关键词，很可能是 Orchestrator 在介绍系统
+    orchestrator_indicators = [
+        r"orchestrator\s*agent",
+        r"协调以下专家",
+        r"协调.*专家.*agent",
+        r"我会.*委托",
+        r"请告诉我.*需要",
+    ]
+
+    for indicator in orchestrator_indicators:
+        if re.search(indicator, response_lower):
+            return "orchestrator"
+
+    # 检测子代理的签名响应 - 必须在开头且是签名格式
+    # Coder Agent 签名：必须在开头，且有冒号，后面不是" - "（列表格式）
+    coder_sig_pattern = r"^[\s\S]{0,60}👨‍💻\s*\*\*\s*coder[ -]agent\s*\*\*\s*:(?!.*\s-\s)"
+    if re.search(coder_sig_pattern, response_lower):
         return "coder"
-    if "sre" in response_lower and "agent" in response_lower:
+
+    # SRE Agent 签名
+    sre_sig_pattern = r"^[\s\S]{0,60}🔧\s*\*\*\s*sre[ -]agent\s*\*\*\s*:(?!.*\s-\s)"
+    if re.search(sre_sig_pattern, response_lower):
         return "sre"
 
-    # 默认返回 orchestrator（主代理）
+    # 检查是否是 Orchestrator 的汇总（包含 "Agent 完成"）
+    if re.search(r"agent\s+完成|完成\s*任务", response_lower):
+        return "orchestrator"
+
+    # 默认返回 orchestrator
     return "orchestrator"
 
 

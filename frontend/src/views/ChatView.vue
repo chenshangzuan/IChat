@@ -3,14 +3,12 @@
     <!-- 侧边栏 -->
     <aside class="sidebar">
       <div class="sidebar-header">
-        <h2>LangChain 学习</h2>
-        <el-button
-          type="primary"
-          :icon="Plus"
-          @click="handleNewChat"
-          circle
-          size="small"
-        />
+        <h2>
+          <el-icon :size="20" class="title-icon">
+            <ChatDotRound />
+          </el-icon>
+          LangChain 学习
+        </h2>
       </div>
 
       <div class="demo-list">
@@ -76,6 +74,17 @@
                       {{ message.agentMetadata.tool_calls }}
                     </span>
                   </el-tooltip>
+                  <el-tooltip content="Skill 调用" placement="top">
+                    <span class="stat-item">
+                      <el-icon><MagicStick /></el-icon>
+                      {{ message.agentMetadata.skill_calls }}
+                    </span>
+                  </el-tooltip>
+                  <el-tooltip v-if="message.agentMetadata.skills.length > 0" :content="`使用的 Skills: ${message.agentMetadata.skills.join(', ')}`" placement="top">
+                    <span class="stat-item skills-badge">
+                      {{ message.agentMetadata.skills.map(s => getSkillIcon(s)).join(' ') }}
+                    </span>
+                  </el-tooltip>
                   <el-tooltip content="耗时" placement="top">
                     <span class="stat-item">
                       <el-icon><Clock /></el-icon>
@@ -112,6 +121,24 @@
 
       <!-- 输入区域 -->
       <div class="input-area">
+        <el-dropdown
+          v-if="currentPresetQuestions.length > 0"
+          trigger="click"
+          @command="handlePresetQuestion"
+        >
+          <el-button circle :icon="QuestionFilled" title="预设问题" />
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item
+                v-for="question in currentPresetQuestions"
+                :key="question"
+                :command="question"
+              >
+                {{ question }}
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <el-input
           v-model="inputMessage"
           type="textarea"
@@ -135,11 +162,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import type { AgentMetadata } from '@/api/chat'
 import {
-  Plus,
   ChatDotRound,
   User,
   Service,
@@ -147,14 +173,40 @@ import {
   Right,
   Tools,
   Clock,
+  QuestionFilled,
+  MagicStick,
 } from '@element-plus/icons-vue'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
-import 'highlight.js/styles/github-dark.css'
+import 'highlight.js/styles/github.css'
 
 const chatStore = useChatStore()
 const inputMessage = ref('')
 const messagesContainer = ref<HTMLElement>()
+
+// 每个 demo 的预设问题
+const presetQuestionsMap: Record<string, string[]> = {
+  'deepagents': [
+    '你现在有哪些skills',
+    '帮我写一个Python快速排序算法',
+    '如何分析 Nginx 日志中的 502 错误？',
+    '如何部署一个 FastAPI 服务到生产环境？',
+    '帮我把这个接口描述规范化：query ai gateway list',
+    '帮我把这个接口操作符规范化：zec:elasticIp:listNetworkTypes',
+  ],
+  'basic-chat': [
+    '什么是 LangChain？',
+    'LLM 是如何工作的？',
+    '什么是 Prompt Engineering？',
+    '什么是 RAG（检索增强生成）？',
+    '介绍一下 AI Agent 的概念',
+  ],
+}
+
+// 当前 demo 的预设问题
+const currentPresetQuestions = computed(() => {
+  return presetQuestionsMap[chatStore.currentDemo] || []
+})
 
 const md = new MarkdownIt({
   highlight: function (str, lang) {
@@ -205,6 +257,22 @@ function getAgentTagType(agentType?: string): string {
   return types[agentType || 'orchestrator'] || 'primary'
 }
 
+function getSkillIcon(skillName: string): string {
+  const icons: Record<string, string> = {
+    // Coder skills
+    'code-generation': '✨',
+    'code-optimization': '⚡',
+    'code-review': '🔍',
+    // SRE skills
+    'log-analysis': '📊',
+    'deployment': '🚀',
+    'sql-audit': '🗄️',
+    'audit-log-normalization': '📋',
+    'sre-operations': '🔧',
+  }
+  return icons[skillName] || '🎨'
+}
+
 async function handleSend() {
   const message = inputMessage.value.trim()
   if (!message || chatStore.isLoading) return
@@ -220,6 +288,10 @@ function handleNewChat() {
 
 function handleSelectDemo(demoId: string) {
   chatStore.switchDemo(demoId)
+}
+
+function handlePresetQuestion(question: string) {
+  inputMessage.value = question
 }
 
 function scrollToBottom() {
@@ -253,15 +325,20 @@ onMounted(() => {
 
 .sidebar-header {
   padding: 20px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
   border-bottom: 1px solid #34495e;
 }
 
 .sidebar-header h2 {
   font-size: 18px;
   font-weight: 600;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sidebar-header .title-icon {
+  color: #3498db;
 }
 
 .demo-list {
@@ -286,6 +363,14 @@ onMounted(() => {
   background: #3498db;
 }
 
+.demo-item.active .demo-name {
+  color: white;
+}
+
+.demo-item.active .demo-description {
+  color: rgba(255, 255, 255, 0.9);
+}
+
 .demo-info {
   display: flex;
   justify-content: space-between;
@@ -301,6 +386,7 @@ onMounted(() => {
   font-size: 12px;
   color: #95a5a6;
   margin: 0;
+  line-height: 1.4;
 }
 
 .chat-main {
@@ -398,15 +484,34 @@ onMounted(() => {
 }
 
 .message-text :deep(pre) {
-  background: #1e1e1e;
-  padding: 12px;
-  border-radius: 6px;
+  background: #f6f8fa;
+  padding: 12px 16px;
+  border-radius: 8px;
   overflow-x: auto;
+  border: 1px solid #e1e4e8;
+  margin: 8px 0;
+}
+
+.message-text :deep(pre code) {
+  background: transparent;
+  padding: 0;
+  color: #24292f;
 }
 
 .message-text :deep(code) {
-  font-family: 'Monaco', 'Menlo', monospace;
+  font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
   font-size: 14px;
+  color: #24292f;
+}
+
+/* 行内代码样式 */
+.message-text :deep(p code),
+.message-text :deep(li code) {
+  background: #f6f8fa;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid #e1e4e8;
+  font-size: 13px;
 }
 
 .message-time {
@@ -496,5 +601,13 @@ onMounted(() => {
 
 .stat-item .el-icon {
   font-size: 14px;
+}
+
+.skills-badge {
+  font-size: 14px;
+  padding: 2px 6px;
+  background: #f0f0f0;
+  border-radius: 4px;
+  margin-left: 4px;
 }
 </style>
