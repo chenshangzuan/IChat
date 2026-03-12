@@ -6,6 +6,7 @@ Agent Tracker - 跟踪多代理系统的委托过程
 - 工具调用详情
 - 代理响应状态
 - 时间戳和性能指标
+- Skill 调用（通过 middleware 的上下文变量）
 """
 import logging
 import json
@@ -14,6 +15,23 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, asdict
 from langchain_core.messages import BaseMessage
+
+# 尝试从 agents 模块导入上下文变量函数
+# 如果 agents 模块不可用（例如在单元测试中），使用空实现
+try:
+    from agents.skill_tracking_middleware import (
+        get_skill_calls_context,
+        clear_skill_calls_context,
+    )
+    HAS_SKILL_CONTEXT = True
+except ImportError:
+    HAS_SKILL_CONTEXT = False
+
+    def get_skill_calls_context() -> list:
+        return []
+
+    def clear_skill_calls_context():
+        pass
 
 # 配置日志 - 确保在终端中可见
 logging.basicConfig(
@@ -305,6 +323,19 @@ class AgentTracker:
                             tool_args=args
                         )
 
+                        # === 新增：记录 subagent 实际使用的 skills ===
+                        # 根据任务描述推断实际使用的 skill，而不是列出所有 skills
+                        print(f"🔍 [DEBUG] 检测 skills for subagent: {subagent_type}, task: {description[:50]}...")
+                        detected_skills = self._detect_used_skills(subagent_type, description)
+                        print(f"🔍 [DEBUG] 检测结果: {detected_skills}")
+                        for skill_name in detected_skills:
+                            self.log_skill_call(
+                                skill_name=skill_name,
+                                agent_name=subagent_names.get(subagent_type, subagent_type),
+                                agent_type=subagent_type.replace('-agent', ''),
+                                task_summary=description[:100] if description else ''
+                            )
+
             # 记录代理响应
             if hasattr(msg, 'type') and hasattr(msg, 'content'):
                 agent_type = self._detect_agent_type(msg.content)
@@ -317,18 +348,31 @@ class AgentTracker:
                     message_index=i
                 )
 
-                # 如果是子代理（coder 或 sre），检测并记录使用的 skill
-                if agent_type in ["coder", "sre"]:
-                    skill_name = self._detect_skill_from_content(msg.content, agent_type)
-                    if skill_name:
-                        # 生成任务摘要（取前100个字符）
-                        task_summary = msg.content[:100]
-                        self.log_skill_call(
-                            skill_name=skill_name,
-                            agent_name=agent_name,
-                            agent_type=agent_type,
-                            task_summary=task_summary
-                        )
+        # === 从上下文变量中读取 skill 调用信息 ===
+        # 这替代了之前通过内容匹配检测 skill 的方法
+        if HAS_SKILL_CONTEXT:
+            context_skill_calls = get_skill_calls_context()
+            for skill_call_dict in context_skill_calls:
+                # 检查是否已经记录过这个 skill 调用（避免重复）
+                skill_name = skill_call_dict.get('skill_name', '')
+                agent_name = skill_call_dict.get('agent_name', '')
+
+                # 简单的去重检查：如果最后一个 skill 调用是相同的，跳过
+                if self.skill_calls:
+                    last_skill = self.skill_calls[-1]
+                    if last_skill.skill_name == skill_name and last_skill.agent_name == agent_name:
+                        continue
+
+                # 记录 skill 调用
+                self.log_skill_call(
+                    skill_name=skill_name,
+                    agent_name=agent_name,
+                    agent_type=skill_call_dict.get('agent_type', ''),
+                    task_summary=skill_call_dict.get('task_summary', '')
+                )
+
+            # 清空上下文变量，为下一次请求准备
+            clear_skill_calls_context()
 
     def _format_agent_name(self, name: str) -> str:
         """格式化代理名称"""
@@ -422,85 +466,222 @@ class AgentTracker:
         }
         return icons.get(skill_name, "🎨")
 
-    def _detect_skill_from_content(self, content: str, agent_type: str) -> str:
-        """从内容中检测使用的 skill
+    def _get_subagent_skills(self, subagent_type: str) -> List[str]:
+        """
+        从 skills 目录中读取 subagent 的 skills 列表
+
+        通过扫描 SKILL.md 文件的 YAML frontmatter 动态获取 skills。
 
         Args:
-            content: 子代理的响应内容
-            agent_type: agent 类型 (coder, sre)
+            subagent_type: Subagent 类型，如 'coder-agent', 'sre-agent'
 
         Returns:
-            检测到的 skill 名称，如果未检测到返回空字符串
+            该 subagent 的 skills 列表
         """
+        import os
+        import yaml
         import re
 
-        content_lower = content.lower()
-
-        # 定义每个 agent 的 skill 检测模式
-        skill_patterns = {
-            "coder": {
-                "code-generation": [
-                    r"create.*implementation",
-                    r"write.*code",
-                    r"implement",
-                    r"生成.*代码",
-                    r"编写.*实现",
-                ],
-                "code-optimization": [
-                    r"optimi[sz]e",
-                    r"refactor",
-                    r"improve.*performance",
-                    r"优化",
-                    r"重构",
-                ],
-                "code-review": [
-                    r"review",
-                    r"audit.*code",
-                    r"代码审查",
-                    r"代码审核",
-                ],
-            },
-            "sre": {
-                "log-analysis": [
-                    r"log.*analy[sz]is",
-                    r"analy[sz]e.*log",
-                    r"日志.*分析",
-                    r"分析.*日志",
-                ],
-                "deployment": [
-                    r"deplo[y]",
-                    r"release",
-                    r"部署",
-                    r"发布",
-                ],
-                "sql-audit": [
-                    r"sql.*audit",
-                    r"query.*review",
-                    r"sql.*优化",
-                    r"sql.*审核",
-                ],
-                "audit-log-normalization": [
-                    r"audit.*log.*normali[zs]ation",
-                    r"normali[zs]e.*audit",
-                    r"接口.*规范",
-                    r"接口.*标准化",
-                    r"audit.*log",
-                ],
-                "sre-operations": [
-                    r"operation",
-                    r"infrastructure",
-                    r"运维",
-                ],
-            },
+        # 映射 subagent_type 到 skills 目录
+        subagent_skill_dirs = {
+            'coder-agent': 'skills/coder/',
+            'sre-agent': 'skills/sre/',
+            'general-purpose': '',
         }
 
-        # 获取当前 agent 的 skill 模式
-        agent_skills = skill_patterns.get(agent_type, {})
+        skill_dir = subagent_skill_dirs.get(subagent_type, '')
+        if not skill_dir or not os.path.exists(skill_dir):
+            return []
 
-        # 检测匹配的 skill
-        for skill_name, patterns in agent_skills.items():
-            for pattern in patterns:
-                if re.search(pattern, content_lower):
-                    return skill_name
+        skills = []
+        try:
+            # 遍历 skills 目录中的子目录
+            for item in os.listdir(skill_dir):
+                item_path = os.path.join(skill_dir, item)
+                if not os.path.isdir(item_path):
+                    continue
 
-        return ""  # 未检测到具体 skill
+                # 检查是否存在 SKILL.md 文件
+                skill_md_path = os.path.join(item_path, 'SKILL.md')
+                if not os.path.exists(skill_md_path):
+                    continue
+
+                # 读取 SKILL.md 文件
+                try:
+                    with open(skill_md_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+
+                    # 解析 YAML frontmatter
+                    frontmatter_pattern = r"^---\s*\n(.*?)\n---\s*\n"
+                    match = re.match(frontmatter_pattern, content, re.DOTALL)
+                    if match:
+                        frontmatter_str = match.group(1)
+                        frontmatter_data = yaml.safe_load(frontmatter_str)
+
+                        # 提取 skill name
+                        skill_name = frontmatter_data.get('name', '')
+                        if skill_name:
+                            skills.append(skill_name)
+                            logger.debug(f"[AgentTracker] 发现 skill: {skill_name} from {skill_md_path}")
+
+                except Exception as e:
+                    logger.warning(f"[AgentTracker] 读取 skill 文件失败 {skill_md_path}: {e}")
+
+        except Exception as e:
+            logger.error(f"[AgentTracker] 扫描 skills 目录失败 {skill_dir}: {e}")
+
+        return skills
+
+    def _detect_used_skills(self, subagent_type: str, task_description: str) -> List[str]:
+        """
+        从 SKILL.md 文件中读取技能信息，根据任务描述匹配最相关的 skill
+
+        动态读取 skills 目录中的 SKILL.md 文件，解析 description，
+        并根据任务描述匹配最相关的 skill。
+
+        Args:
+            subagent_type: Subagent 类型
+            task_description: 任务描述
+
+        Returns:
+            实际使用的 skills 列表
+        """
+        import os
+        import yaml
+        import re
+
+        # 映射 subagent_type 到 skills 目录
+        subagent_skill_dirs = {
+            'coder-agent': 'skills/coder/',
+            'sre-agent': 'skills/sre/',
+            'general-purpose': '',
+        }
+
+        skill_dir = subagent_skill_dirs.get(subagent_type, '')
+        if not skill_dir or not os.path.exists(skill_dir):
+            return []
+
+        # 存储每个 skill 的信息
+        skill_infos = []
+
+        try:
+            # 遍历 skills 目录
+            for item in os.listdir(skill_dir):
+                item_path = os.path.join(skill_dir, item)
+                if not os.path.isdir(item_path):
+                    continue
+
+                # 检查 SKILL.md 文件
+                skill_md_path = os.path.join(item_path, 'SKILL.md')
+                if not os.path.exists(skill_md_path):
+                    continue
+
+                try:
+                    with open(skill_md_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+
+                    # 解析 YAML frontmatter
+                    frontmatter_pattern = r"^---\s*\n(.*?)\n---\s*\n"
+                    match = re.match(frontmatter_pattern, content, re.DOTALL)
+                    if match:
+                        frontmatter_str = match.group(1)
+                        frontmatter_data = yaml.safe_load(frontmatter_str)
+
+                        skill_name = frontmatter_data.get('name', '')
+                        skill_description = frontmatter_data.get('description', '')
+
+                        if skill_name and skill_description:
+                            # 也读取 skill 的详细内容（除了 frontmatter）
+                            skill_content = re.sub(frontmatter_pattern, '', content, flags=re.DOTALL)
+
+                            skill_infos.append({
+                                'name': skill_name,
+                                'description': skill_description,
+                                'content': skill_content.lower(),
+                                'path': skill_md_path
+                            })
+
+                except Exception as e:
+                    logger.warning(f"[AgentTracker] 读取 skill 文件失败 {skill_md_path}: {e}")
+
+        except Exception as e:
+            logger.error(f"[AgentTracker] 扫描 skills 目录失败 {skill_dir}: {e}")
+
+        if not skill_infos:
+            return []
+
+        # 根据任务描述匹配最相关的 skill
+        desc_lower = task_description.lower()
+
+        # 计算每个 skill 的匹配分数
+        skill_scores = {}
+        for skill_info in skill_infos:
+            score = 0
+
+            # 1. 匹配 description 中的关键词
+            desc_words = re.findall(r'\b\w+\b', skill_info['description'].lower())
+            for word in desc_words:
+                if len(word) > 2 and word in desc_lower:
+                    score += 2  # description 匹配权重高
+
+            # 2. 匹配 content 中的关键词
+            content_words = re.findall(r'\b\w+\b', skill_info['content'])
+            word_freq = {}
+            for word in content_words:
+                if len(word) > 2:
+                    word_freq[word] = word_freq.get(word, 0) + 1
+
+            for word, freq in word_freq.items():
+                if word in desc_lower:
+                    score += freq * 0.5
+
+            # 3. 编程相关的特殊匹配规则
+            # code-generation: 匹配 "写", "创建", "实现", "生成", "代码", "函数", "算法"
+            if skill_info['name'] == 'code-generation':
+                if any(w in desc_lower for w in ['写', '编写', '创建', '实现', '生成', '代码', '函数', '算法', 'algorithm', 'function', 'write', 'create', 'implement', 'generate']):
+                    score += 3
+
+            # code-optimization: 匹配 "优化", "改进", "性能", "重构"
+            elif skill_info['name'] == 'code-optimization':
+                if any(w in desc_lower for w in ['优化', '改进', '性能', '重构', 'optim', 'improve', 'refactor']):
+                    score += 3
+
+            # code-review: 匹配 "审查", "审核", "检查", "质量", "bug"
+            elif skill_info['name'] == 'code-review':
+                if any(w in desc_lower for w in ['审查', '审核', '检查', '质量', 'bug', 'review', 'audit', 'check']):
+                    score += 3
+
+            # log-analysis: 匹配 "日志", "分析", "错误", "故障"
+            elif skill_info['name'] == 'log-analysis':
+                if any(w in desc_lower for w in ['日志', '分析', '错误', '故障', 'log', 'error', 'analy']):
+                    score += 3
+
+            # deployment: 匹配 "部署", "发布", "上线"
+            elif skill_info['name'] == 'deployment':
+                if any(w in desc_lower for w in ['部署', '发布', '上线', 'deplo', 'release']):
+                    score += 3
+
+            # sql-audit: 匹配 "sql", "数据库", "查询"
+            elif skill_info['name'] == 'sql-audit':
+                if any(w in desc_lower for w in ['sql', '数据库', 'query', '查询']):
+                    score += 3
+
+            # audit-log-normalization: 匹配 "规范", "标准", "统一", "审计日志"
+            elif skill_info['name'] == 'audit-log-normalization':
+                if any(w in desc_lower for w in ['规范', '标准', '统一', '审计日志', 'norm', 'standard', '接口描述']):
+                    score += 3
+
+            if score > 0:
+                skill_scores[skill_info['name']] = score
+
+        # 返回得分最高的 skill
+        if skill_scores:
+            max_score = max(skill_scores.values())
+            best_skills = [skill for skill, score in skill_scores.items() if score == max_score]
+            print(f"[AgentTracker] 检测到 skills: {best_skills} (分数: {skill_scores})")
+            return best_skills
+
+        # 如果没有匹配到，返回空列表
+        print(f"[AgentTracker] 没有检测到匹配的 skills (任务: {task_description[:50]})")
+        return []
+

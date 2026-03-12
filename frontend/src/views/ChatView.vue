@@ -481,15 +481,16 @@ onMounted(() => {
 
 .message.assistant .message-text {
   background: #f0f0f0;
+  padding: 16px 20px;
 }
 
 .message-text :deep(pre) {
   background: #f6f8fa;
-  padding: 12px 16px;
+  padding: 16px;
   border-radius: 8px;
   overflow-x: auto;
   border: 1px solid #e1e4e8;
-  margin: 8px 0;
+  margin: 12px 0;
 }
 
 .message-text :deep(pre code) {
@@ -502,6 +503,29 @@ onMounted(() => {
   font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
   font-size: 14px;
   color: #24292f;
+}
+
+/* 列表样式 */
+.message-text :deep(ol),
+.message-text :deep(ul) {
+  padding-left: 24px;
+  margin: 8px 0;
+}
+
+.message-text :deep(li) {
+  margin: 4px 0;
+  line-height: 1.6;
+}
+
+/* 代码块内的列表 */
+.message-text :deep(pre ol),
+.message-text :deep(pre ul) {
+  margin: 8px 0;
+  padding-left: 28px;
+}
+
+.message-text :deep(pre li) {
+  margin: 4px 0;
 }
 
 /* 行内代码样式 */

@@ -85,30 +85,38 @@ export const useChatStore = defineStore('chat', () => {
     isLoading.value = true
 
     try {
-      // 根据 demo 类型选择流式或非流式
-      // deepagents 使用非流式以获取 agent 元数据
-      if (currentDemo.value === 'deepagents') {
-        const response = await sendMessage(
-          userMessage,
-          sessionId.value,
-          currentDemo.value
-        )
-        assistantMsg.content = response.response
-        // 保存 agent 元数据
-        if (response.agent_metadata) {
-          assistantMsg.agentMetadata = response.agent_metadata
-        }
-      } else {
-        // 流式接收响应
-        await sendMessageStream(
-          userMessage,
-          (chunk) => {
-            assistantMsg.content += chunk
-          },
-          sessionId.value,
-          currentDemo.value
-        )
-      }
+      // 所有 demo 都使用流式接收响应
+      // deepagents 会在流结束时发送元数据标记
+      let fullContent = ''
+
+      await sendMessageStream(
+        userMessage,
+        (chunk) => {
+          // 检查是否是元数据标记
+          if (chunk.includes('__METADATA__:')) {
+            // 提取元数据
+            const metadataMatch = chunk.match(/__METADATA__:(.+)$/)
+            if (metadataMatch) {
+              try {
+                const metadata = JSON.parse(metadataMatch[1])
+                // 保存 agent 元数据
+                assistantMsg.agentMetadata = metadata
+                // 移除元数据标记（不显示在内容中）
+                assistantMsg.content = fullContent.replace(/__METADATA__:.+$/, '').trim()
+              } catch (e) {
+                console.error('Failed to parse metadata:', e)
+                assistantMsg.content = fullContent + chunk
+              }
+            }
+          } else {
+            // 普通内容，累加并显示
+            fullContent += chunk
+            assistantMsg.content = fullContent
+          }
+        },
+        sessionId.value,
+        currentDemo.value
+      )
     } catch (error) {
       assistantMsg.content = `错误: ${error instanceof Error ? error.message : '未知错误'}`
     } finally {

@@ -25,7 +25,8 @@ coder_subagent = {
     "description": "Expert coder for writing, reviewing, and optimizing code. Use this agent for any code-related tasks.",
     "model": default_llm,
     "tools": [],
-    "skills": ["skills/coder/"],  # 指向 coder skills 目录
+    # 使用 skills 参数（create_deep_agent 会自动创建 SkillsMiddleware）
+    "skills": ["skills/coder/"],
     "system_prompt": """You are an Expert Coder agent with access to specialized skills.
 
 ## Your Skills
@@ -93,7 +94,8 @@ sre_subagent = {
     "description": "Expert SRE for deployment, log analysis, SQL auditing, and infrastructure tasks. Use this agent for operations-related work.",
     "model": default_llm,
     "tools": [],
-    "skills": ["skills/sre/"],  # 指向 sre skills 目录
+    # 使用 skills 参数（create_deep_agent 会自动创建 SkillsMiddleware）
+    "skills": ["skills/sre/"],
     "system_prompt": """You are an Expert SRE (Site Reliability Engineering) agent with access to specialized skills.
 
 ## Your Skills

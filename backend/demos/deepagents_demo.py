@@ -8,8 +8,13 @@ from typing import AsyncIterator, Dict, Any
 import re
 import logging
 import sys
+import asyncio
+import json
 
 from agents.deepagents import orchestrator
+from agents.skill_tracking_middleware import (
+    clear_skill_calls_context,
+)
 from common.agent_tracker import AgentTracker
 
 # 配置日志 - 确保在终端中可见
@@ -113,7 +118,6 @@ async def chat_response(user_input: str, session_id: str = "default") -> str:
                 if isinstance(tool_call, dict):
                     tool_name = tool_call.get('name', 'unknown')
                     tool_args = tool_call.get('args', {})
-                    # 将参数转换为可读字符串
                     if isinstance(tool_args, dict):
                         args_str = str(tool_args)[:100]
                     else:
@@ -231,6 +235,108 @@ async def chat_stream(user_input: str, session_id: str = "default") -> AsyncIter
         # 提取内容块
         if hasattr(chunk, 'content'):
             yield chunk.content
+
+
+async def chat_stream_with_metadata(user_input: str, session_id: str = "default") -> AsyncIterator[str]:
+    """
+    流式聊天响应（包含元数据）
+
+    流结束时发送特殊的元数据标记，格式为：
+    \n__METADATA__:json字符串
+
+    Args:
+        user_input: 用户输入
+        session_id: 会话 ID（用于多轮对话）
+
+    Yields:
+        Agent 的响应文本片段
+    """
+    # 清空上下文变量，为新的请求准备
+    clear_skill_calls_context()
+
+    # 创建跟踪器
+    tracker = AgentTracker(session_id)
+    tracker.log_session_start(user_input)
+
+    logger.info("=" * 60)
+    logger.info(f"🔵 [DeepAgents Demo] 收到流式请求")
+    logger.info(f"  Session ID: {session_id}")
+    logger.info(f"  用户输入: {user_input[:100]}...")
+    logger.info("=" * 60)
+
+    # 收集所有消息用于元数据分析
+    all_messages = []
+
+    # 流式输出响应
+    async for chunk in orchestrator.astream(
+        {"messages": [{"role": "user", "content": user_input}]},
+        stream_mode="messages"
+    ):
+        # deepagents 的 astream 返回 tuple: (AIMessage, metadata)
+        if isinstance(chunk, tuple) and len(chunk) >= 1:
+            message = chunk[0]  # AIMessage
+            # 收集消息用于分析
+            all_messages.append(message)
+            # 提取内容块并输出
+            if hasattr(message, 'content') and message.content:
+                # 将大块内容拆分为更小的块，实现更好的流式体验
+                content = message.content
+                # 每 50 个字符为一个块，模拟打字效果
+                for i in range(0, len(content), 50):
+                    yield content[i:i+50]
+                    # 添加短暂延迟（20ms），让流式效果更明显
+                    await asyncio.sleep(0.02)
+        elif hasattr(chunk, 'content') and chunk.content:
+            # 兼容其他可能的格式
+            all_messages.append(chunk)
+            content = chunk.content
+            for i in range(0, len(content), 50):
+                yield content[i:i+50]
+                await asyncio.sleep(0.02)
+
+    # 使用跟踪器分析消息历史
+    tracker.detect_and_log_tool_calls(all_messages)
+
+    # 找到响应文本
+    response_content = ""
+    for msg in all_messages:
+        msg_type = getattr(msg, 'type', '')
+        if msg_type == 'tool' and hasattr(msg, 'content'):
+            response_content = msg.content
+            break
+    if not response_content and all_messages:
+        response_content = all_messages[-1].content if hasattr(all_messages[-1], 'content') else ""
+
+    # 检测 agent 类型
+    detected_agent = detect_agent(response_content)
+
+    tracker.log_session_complete()
+
+    # 获取跟踪器摘要
+    tracker_summary = tracker.get_summary()
+
+    # 提取 skill 名称列表
+    skill_calls_data = tracker_summary.get("skill_calls", [])
+    skill_names = [call.get("skill_name", "") for call in skill_calls_data if call.get("skill_name")]
+
+    # 构建元数据
+    metadata = {
+        "agent_type": detected_agent,
+        "delegations": tracker_summary.get("delegation_count", 0),
+        "tool_calls": tracker_summary.get("tool_call_count", 0),
+        "skill_calls": tracker_summary.get("skill_call_count", 0),
+        "skills": skill_names,
+        "duration": tracker_summary.get("duration", 0.0)
+    }
+
+    logger.info("=" * 60)
+    logger.info(f"🟢 [DeepAgents Demo] 流式响应完成")
+    logger.info(f"  检测到的 Agent: {detected_agent}")
+    logger.info(f"  元数据: {metadata}")
+    logger.info("=" * 60)
+
+    # 发送元数据标记（特殊格式，前端解析）
+    yield f"\n__METADATA__:{json.dumps(metadata)}"
 
 
 def clear_history(session_id: str = "default"):

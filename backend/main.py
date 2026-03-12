@@ -244,8 +244,8 @@ async def chat_stream_endpoint(request: ChatRequest):
                     yield chunk
 
             elif request.demo_id == "deepagents":
-                # DeepAgents Demo
-                async for chunk in deepagents_demo.chat_stream(
+                # DeepAgents Demo（流式 + 元数据）
+                async for chunk in deepagents_demo.chat_stream_with_metadata(
                     user_input=request.message,
                     session_id=request.session_id
                 ):
