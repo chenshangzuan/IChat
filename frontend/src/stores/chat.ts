@@ -202,6 +202,17 @@ export const useChatStore = defineStore('chat', () => {
     return true
   }
 
+  function startNewChat() {
+    // 生成新的 sessionId
+    const newSessionId = `session-${Date.now()}`
+    sessionId.value = newSessionId
+
+    // 清空当前 demo 的消息
+    demoMessages.value.set(currentDemo.value, [])
+
+    console.log('[ChatStore] 开始新聊天:', newSessionId)
+  }
+
   return {
     messages,
     currentDemo,
@@ -215,5 +226,6 @@ export const useChatStore = defineStore('chat', () => {
     sendMessageAndReceive,
     clearHistory,
     switchDemo,
+    startNewChat,
   }
 })

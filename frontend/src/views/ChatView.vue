@@ -1,16 +1,15 @@
 <template>
   <div class="chat-view">
-    <!-- 侧边栏 -->
-    <aside class="sidebar">
+    <!-- 左侧：Demo 列表（主目录） -->
+    <aside class="demo-list-sidebar">
       <div class="sidebar-header">
         <h2>
-          <el-icon :size="20" class="title-icon">
+          <el-icon :size="18" class="title-icon">
             <ChatDotRound />
           </el-icon>
-          LangChain 学习
+          IChat
         </h2>
       </div>
-
       <div class="demo-list">
         <div
           v-for="demo in chatStore.demos"
@@ -28,7 +27,46 @@
       </div>
     </aside>
 
-    <!-- 主聊天区域 -->
+    <!-- 中间：聊天侧边栏（二级） - 仅 deepagents 显示 -->
+    <aside class="chat-sidebar" :class="{ collapsed: !chatSidebarExpanded }" v-if="chatStore.currentDemo === 'deepagents'">
+      <!-- 新聊天 -->
+      <div class="new-chat-item" @click="handleNewChat">
+        <el-icon :size="18">
+          <Edit />
+        </el-icon>
+        <span>新聊天</span>
+      </div>
+
+      <!-- 历史聊天列表（占位） -->
+      <div class="history-section" v-if="showHistory">
+        <div class="section-header" @click="toggleHistory">
+          <span>历史聊天</span>
+          <el-icon :class="{ 'rotated': historyExpanded }">
+            <ArrowDown />
+          </el-icon>
+        </div>
+        <div v-if="historyExpanded" class="history-list">
+          <div class="history-empty">
+            <el-icon><Clock /></el-icon>
+            <span>即将推出</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 二级侧边栏切换按钮 -->
+    <div
+      v-if="chatStore.currentDemo === 'deepagents'"
+      class="sidebar-toggle"
+      @click="toggleChatSidebar"
+    >
+      <el-icon :size="16">
+        <ArrowLeft v-if="chatSidebarExpanded" />
+        <ArrowRight v-else />
+      </el-icon>
+    </div>
+
+    <!-- 右侧：主聊天区域 -->
     <main class="chat-main">
       <!-- 消息列表 -->
       <div class="messages-container" ref="messagesContainer">
@@ -175,6 +213,10 @@ import {
   Clock,
   QuestionFilled,
   MagicStick,
+  Edit,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
 } from '@element-plus/icons-vue'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
@@ -183,6 +225,13 @@ import 'highlight.js/styles/github.css'
 const chatStore = useChatStore()
 const inputMessage = ref('')
 const messagesContainer = ref<HTMLElement>()
+
+// 历史聊天列表状态
+const showHistory = ref(true)
+const historyExpanded = ref(false)
+
+// 二级侧边栏展开状态
+const chatSidebarExpanded = ref(true)
 
 // 每个 demo 的预设问题
 const presetQuestionsMap: Record<string, string[]> = {
@@ -283,7 +332,8 @@ async function handleSend() {
 }
 
 function handleNewChat() {
-  chatStore.clearHistory()
+  chatStore.startNewChat()
+  inputMessage.value = ''
 }
 
 function handleSelectDemo(demoId: string) {
@@ -292,6 +342,14 @@ function handleSelectDemo(demoId: string) {
 
 function handlePresetQuestion(question: string) {
   inputMessage.value = question
+}
+
+function toggleHistory() {
+  historyExpanded.value = !historyExpanded.value
+}
+
+function toggleChatSidebar() {
+  chatSidebarExpanded.value = !chatSidebarExpanded.value
 }
 
 function scrollToBottom() {
@@ -309,27 +367,29 @@ onMounted(() => {
 
 <style scoped>
 .chat-view {
+  position: relative;
   display: flex;
   height: 100vh;
-  background: #f5f5f5;
+  background: #F5F3FF;
 }
 
-.sidebar {
-  width: 260px;
-  background: #2c3e50;
-  color: white;
+/* 左侧 Demo 列表（主目录） */
+.demo-list-sidebar {
+  width: 200px;
+  background: #F5F3FF;
+  color: #0F172A;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid #ddd;
+  border-right: 1px solid #EDE9FE;
 }
 
-.sidebar-header {
-  padding: 20px;
-  border-bottom: 1px solid #34495e;
+.demo-list-sidebar .sidebar-header {
+  padding: 16px;
+  border-bottom: 1px solid #EDE9FE;
 }
 
-.sidebar-header h2 {
-  font-size: 18px;
+.demo-list-sidebar .sidebar-header h2 {
+  font-size: 16px;
   font-weight: 600;
   margin: 0;
   display: flex;
@@ -337,58 +397,227 @@ onMounted(() => {
   gap: 8px;
 }
 
-.sidebar-header .title-icon {
-  color: #3498db;
+.demo-list-sidebar .title-icon {
+  color: #7C3AED;
 }
 
-.demo-list {
+.demo-list-sidebar .demo-list {
   flex: 1;
   overflow-y: auto;
-  padding: 10px;
+  padding: 8px;
 }
 
-.demo-item {
-  padding: 12px;
-  margin-bottom: 8px;
-  border-radius: 8px;
+.demo-list-sidebar .demo-item {
+  padding: 10px;
+  margin-bottom: 4px;
+  border-radius: 6px;
   cursor: pointer;
   transition: background 0.2s;
 }
 
-.demo-item:hover {
-  background: #34495e;
+.demo-list-sidebar .demo-item:hover {
+  background: #EDE9FE;
 }
 
-.demo-item.active {
-  background: #3498db;
+.demo-list-sidebar .demo-item.active {
+  background: #7C3AED;
+  color: #FFFFFF;
 }
 
-.demo-item.active .demo-name {
-  color: white;
+.demo-list-sidebar .demo-item.active .demo-name {
+  color: #FFFFFF;
 }
 
-.demo-item.active .demo-description {
+.demo-list-sidebar .demo-item.active .demo-description {
   color: rgba(255, 255, 255, 0.9);
 }
 
-.demo-info {
+.demo-list-sidebar .demo-info {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 4px;
 }
 
-.demo-name {
+.demo-list-sidebar .demo-name {
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.demo-list-sidebar .demo-description {
+  font-size: 11px;
+  color: #475569;
+  margin: 0;
+  line-height: 1.3;
+}
+
+/* 中间聊天侧边栏（二级） */
+.chat-sidebar {
+  width: 240px;
+  min-width: 240px;
+  max-width: 240px;
+  background: #EDE9FE;
+  color: #0F172A;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #DDD6FE;
+  transition: all 0.3s ease;
+  overflow: hidden;
+}
+
+.chat-sidebar.collapsed {
+  width: 56px;
+  min-width: 56px;
+  max-width: 56px;
+}
+
+/* 收起时隐藏文字 */
+.chat-sidebar.collapsed .new-chat-item span,
+.chat-sidebar.collapsed .section-header span {
+  opacity: 0;
+  visibility: hidden;
+  width: 0;
+  overflow: hidden;
+}
+
+/* 收起时图标居中 */
+.chat-sidebar.collapsed .new-chat-item,
+.chat-sidebar.collapsed .section-header {
+  padding: 14px 0;
+  justify-content: center;
+}
+
+.chat-sidebar.collapsed .new-chat-item {
+  gap: 0;
+}
+
+.chat-sidebar.collapsed .section-header {
+  padding: 14px 0;
+}
+
+.chat-sidebar.collapsed .section-header .el-icon {
+  margin: 0;
+}
+
+/* 收起时隐藏历史聊天的展开箭头 */
+.chat-sidebar.collapsed .section-header > .el-icon:last-child {
+  display: none;
+}
+
+/* 二级侧边栏切换按钮 */
+.sidebar-toggle {
+  position: absolute;
+  left: 440px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 48px;
+  background: #EDE9FE;
+  border: 1px solid #DDD6FE;
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 10;
+  transition: left 0.3s ease, background 0.2s ease;
+  color: #7C3AED;
+}
+
+.sidebar-toggle:hover {
+  background: #DDD6FE;
+}
+
+.sidebar-toggle:active {
+  transform: translateY(-50%) scale(0.95);
+}
+
+/* 当侧边栏收起时，按钮移到左侧 */
+.chat-view:has(.chat-sidebar.collapsed) .sidebar-toggle {
+  left: 256px;
+}
+
+.chat-sidebar .sidebar-header {
+  padding: 16px;
+  border-bottom: 1px solid #E0E7FF;
+}
+
+/* 新聊天项 - 文字链接样式 */
+.new-chat-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: background 0.2s;
+  color: #0F172A;
+  font-size: 14px;
   font-weight: 500;
 }
 
-.demo-description {
-  font-size: 12px;
-  color: #95a5a6;
-  margin: 0;
-  line-height: 1.4;
+.new-chat-item span {
+  transition: opacity 0.2s ease, visibility 0.2s ease, width 0.2s ease;
+  white-space: nowrap;
 }
 
+.new-chat-item:hover {
+  background: rgba(221, 214, 254, 0.7);
+}
+
+.new-chat-item .el-icon {
+  flex-shrink: 0;
+}
+
+/* 历史聊天区域 */
+.history-section {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.history-section .section-header {
+  padding: 14px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background 0.2s;
+}
+
+.history-section .section-header span {
+  transition: opacity 0.2s ease, visibility 0.2s ease;
+  white-space: nowrap;
+}
+
+.history-section .section-header:hover {
+  background: rgba(221, 214, 254, 0.7);
+}
+
+.section-header .el-icon {
+  transition: transform 0.3s;
+}
+
+.section-header .el-icon.rotated {
+  transform: rotate(180deg);
+}
+
+.history-list {
+  padding: 8px;
+}
+
+.history-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px 16px;
+  color: #64748B;
+  font-size: 13px;
+}
+
+/* 右侧主聊天区域 */
 .chat-main {
   flex: 1;
   display: flex;
@@ -448,12 +677,12 @@ onMounted(() => {
 }
 
 .message.user .message-avatar {
-  background: #409eff;
+  background: #7C3AED;
   color: white;
 }
 
 .message.assistant .message-avatar {
-  background: #67c23a;
+  background: #A78BFA;
   color: white;
 }
 
@@ -475,13 +704,14 @@ onMounted(() => {
 }
 
 .message.user .message-text {
-  background: #409eff;
+  background: #7C3AED;
   color: white;
 }
 
 .message.assistant .message-text {
-  background: #f0f0f0;
+  background: #F5F3FF;
   padding: 16px 20px;
+  border: 1px solid #EDE9FE;
 }
 
 .message-text :deep(pre) {
@@ -560,7 +790,7 @@ onMounted(() => {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #909399;
+  background: #A78BFA;
   animation: bounce 1.4s infinite ease-in-out;
 }
 
@@ -604,9 +834,9 @@ onMounted(() => {
   gap: 12px;
   margin-bottom: 8px;
   padding: 8px 12px;
-  background: #f8f9fa;
+  background: #F5F3FF;
   border-radius: 8px;
-  border-left: 3px solid #409eff;
+  border-left: 3px solid #7C3AED;
 }
 
 .agent-stats {
