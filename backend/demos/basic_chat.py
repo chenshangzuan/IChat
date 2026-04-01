@@ -29,8 +29,15 @@ class ChatHistory:
         self.messages.clear()
 
 
-# 全局对话历史实例
-chat_history = ChatHistory()
+# 全局对话历史存储（按 session_id 分隔）
+_session_histories: dict[str, ChatHistory] = {}
+
+
+def _get_history(session_id: str) -> ChatHistory:
+    """获取指定会话的历史记录"""
+    if session_id not in _session_histories:
+        _session_histories[session_id] = ChatHistory()
+    return _session_histories[session_id]
 
 
 async def chat_response(user_input: str, session_id: str = "default") -> str:
@@ -44,8 +51,8 @@ async def chat_response(user_input: str, session_id: str = "default") -> str:
     Returns:
         AI 响应
     """
-    # 获取对话历史
-    history = chat_history.get_history()
+    # 获取指定会话的对话历史
+    history = _get_history(session_id).get_history()
 
     # 构建消息列表（历史 + 当前输入）
     messages = history + [HumanMessage(content=user_input)]
@@ -53,8 +60,8 @@ async def chat_response(user_input: str, session_id: str = "default") -> str:
     # 直接调用模型
     response = await default_llm.ainvoke(messages)
 
-    # 保存到历史
-    chat_history.add_message(user_input, response.content)
+    # 保存到该会话的历史
+    _get_history(session_id).add_message(user_input, response.content)
 
     return response.content
 
@@ -70,8 +77,8 @@ async def chat_stream(user_input: str, session_id: str = "default") -> AsyncIter
     Yields:
         AI 响应的片段
     """
-    # 获取对话历史
-    history = chat_history.get_history()
+    # 获取指定会话的对话历史
+    history = _get_history(session_id).get_history()
 
     # 构建消息列表（历史 + 当前输入）
     messages = history + [HumanMessage(content=user_input)]
@@ -89,4 +96,5 @@ async def chat_stream(user_input: str, session_id: str = "default") -> AsyncIter
 
 def clear_history(session_id: str = "default"):
     """清空对话历史"""
-    chat_history.clear()
+    if session_id in _session_histories:
+        _session_histories[session_id].clear()

@@ -166,11 +166,18 @@ Then provide your detailed response following the relevant skill's format.
 
 
 # 创建主 Orchestrator Agent
-def create_orchestrator():
-    """创建主协调器 Agent，管理 Coder 和 SRE 子代理"""
+def create_orchestrator(checkpointer=None):
+    """
+    创建主协调器 Agent，管理 Coder 和 SRE 子代理
+
+    Args:
+        checkpointer: LangGraph checkpointer 实例（可选，用于会话记忆）
+    """
 
     logger.info("=" * 60)
     logger.info("🚀 [Agents] 正在创建 Orchestrator Agent...")
+    if checkpointer:
+        logger.info(f"📝 [Agents] 已启用 checkpointer: {type(checkpointer).__name__}")
 
     system_prompt = """You are an Orchestrator agent managing a team of specialist AI agents.
 
@@ -296,6 +303,7 @@ You are a **COORDINATOR**, not a **DOER**. Your value comes from correctly deleg
         subagents=[coder_subagent, sre_subagent],
         system_prompt=system_prompt,
         debug=False,  # 关闭调试模式以提高性能
+        checkpointer=checkpointer,  # 会话记忆支持
     )
 
     # 打印 agent 的图信息

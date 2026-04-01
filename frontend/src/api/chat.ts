@@ -97,9 +97,33 @@ export async function sendMessageStream(
 /**
  * 清空对话历史
  */
-export async function clearHistory(sessionId = 'default') {
+export async function clearHistory(
+  sessionId = 'default',
+  demoId = 'deepagents'  // 新增：指定 demo_id
+) {
   const response = await api.post('/chat/clear', {
     session_id: sessionId,
+    demo_id: demoId,
+  })
+  return response.data
+}
+
+/**
+ * 获取对话历史消息
+ */
+export interface HistoryMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  timestamp: number
+}
+
+export async function getHistory(
+  sessionId: string,
+  demoId = 'deepagents'
+): Promise<HistoryMessage[]> {
+  const response = await api.get('/chat/history', {
+    params: { session_id: sessionId, demo_id: demoId }
   })
   return response.data
 }

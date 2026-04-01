@@ -11,11 +11,12 @@ import sys
 import asyncio
 import json
 
-from agents.deepagents import orchestrator
+from agents import get_orchestrator_with_checkpointer
 from agents.skill_tracking_middleware import (
     clear_skill_calls_context,
 )
 from common.agent_tracker import AgentTracker
+from common.session_manager import get_session_manager
 
 # 配置日志 - 确保在终端中可见
 logging.basicConfig(
@@ -88,6 +89,10 @@ async def chat_response(user_input: str, session_id: str = "default") -> str:
     Returns:
         Agent 的响应文本
     """
+    # 获取会话管理器和 orchestrator
+    session_manager = get_session_manager()
+    orchestrator = await get_orchestrator_with_checkpointer()
+
     # 创建跟踪器
     tracker = AgentTracker(session_id)
     tracker.log_session_start(user_input)
@@ -98,9 +103,13 @@ async def chat_response(user_input: str, session_id: str = "default") -> str:
     logger.info(f"  用户输入: {user_input[:100]}...")
     logger.info("=" * 60)
 
-    result = await orchestrator.ainvoke({
-        "messages": [{"role": "user", "content": user_input}]
-    })
+    # 获取会话配置（包含 thread_id）
+    config = await session_manager.get_config(session_id, "deepagents")
+
+    result = await orchestrator.ainvoke(
+        {"messages": [{"role": "user", "content": user_input}]},
+        config=config
+    )
 
     # 使用跟踪器分析消息历史
     tracker.detect_and_log_tool_calls(result["messages"])
@@ -175,13 +184,21 @@ async def chat_response_with_metadata(user_input: str, session_id: str = "defaul
             "tracker_summary": dict,   # 跟踪器摘要（委托事件、工具调用等）
         }
     """
+    # 获取会话管理器和 orchestrator
+    session_manager = get_session_manager()
+    orchestrator = await get_orchestrator_with_checkpointer()
+
     # 创建跟踪器
     tracker = AgentTracker(session_id)
     tracker.log_session_start(user_input)
 
-    result = await orchestrator.ainvoke({
-        "messages": [{"role": "user", "content": user_input}]
-    })
+    # 获取会话配置（包含 thread_id）
+    config = await session_manager.get_config(session_id, "deepagents")
+
+    result = await orchestrator.ainvoke(
+        {"messages": [{"role": "user", "content": user_input}]},
+        config=config
+    )
 
     # 使用跟踪器分析消息历史
     tracker.detect_and_log_tool_calls(result["messages"])
@@ -228,8 +245,16 @@ async def chat_stream(user_input: str, session_id: str = "default") -> AsyncIter
     Yields:
         Agent 的响应文本片段
     """
+    # 获取会话管理器和 orchestrator
+    session_manager = get_session_manager()
+    orchestrator = await get_orchestrator_with_checkpointer()
+
+    # 获取会话配置（包含 thread_id）
+    config = await session_manager.get_config(session_id, "deepagents")
+
     async for chunk in orchestrator.astream(
         {"messages": [{"role": "user", "content": user_input}]},
+        config=config,
         stream_mode="messages"
     ):
         # 提取内容块
@@ -251,6 +276,10 @@ async def chat_stream_with_metadata(user_input: str, session_id: str = "default"
     Yields:
         Agent 的响应文本片段
     """
+    # 获取会话管理器和 orchestrator
+    session_manager = get_session_manager()
+    orchestrator = await get_orchestrator_with_checkpointer()
+
     # 清空上下文变量，为新的请求准备
     clear_skill_calls_context()
 
@@ -267,9 +296,13 @@ async def chat_stream_with_metadata(user_input: str, session_id: str = "default"
     # 收集所有消息用于元数据分析
     all_messages = []
 
+    # 获取会话配置（包含 thread_id）
+    config = await session_manager.get_config(session_id, "deepagents")
+
     # 流式输出响应
     async for chunk in orchestrator.astream(
         {"messages": [{"role": "user", "content": user_input}]},
+        config=config,
         stream_mode="messages"
     ):
         # deepagents 的 astream 返回 tuple: (AIMessage, metadata)
@@ -339,15 +372,14 @@ async def chat_stream_with_metadata(user_input: str, session_id: str = "default"
     yield f"\n__METADATA__:{json.dumps(metadata)}"
 
 
-def clear_history(session_id: str = "default"):
+async def clear_history(session_id: str = "default"):
     """
     清空对话历史
 
-    注意：当前实现暂不支持历史记录清理。
-    需要集成 LangGraph checkpointer 后才能实现。
+    通过删除 checkpoint 来清空指定会话的对话历史。
 
     Args:
         session_id: 会话 ID
     """
-    # TODO: 集成 LangGraph checkpointer 以支持历史记录管理
-    pass
+    session_manager = get_session_manager()
+    await session_manager.clear_session(session_id, "deepagents")

@@ -277,21 +277,161 @@ async def clear_chat_history(request: ChatRequest):
     """
     清空对话历史
 
-    注意：当前版本暂不支持历史记录清理。
-    需要集成 LangGraph checkpointer 后才能实现。
+    清空指定会话的对话历史。
 
     Args:
-        request: 包含 session_id 的请求
+        request: 包含 session_id 和 demo_id 的请求
 
     Returns:
         确认消息
     """
-    # TODO: 集成 LangGraph checkpointer 后实现
-    return {
-        "status": "not_implemented",
-        "message": "历史记录清理功能暂未实现，需要集成 LangGraph checkpointer",
-        "session_id": request.session_id
-    }
+    try:
+        logger.info(f"🗑️ 收到清空历史请求: demo={request.demo_id}, session={request.session_id}")
+
+        # 根据 demo_id 路由到不同的处理函数
+        if request.demo_id == "basic-chat":
+            # Basic Chat Demo
+            basic_chat.clear_history(request.session_id)
+        elif request.demo_id == "deepagents":
+            # DeepAgents Demo
+            await deepagents_demo.clear_history(request.session_id)
+        else:
+            # 未知的 demo_id
+            raise HTTPException(
+                status_code=400,
+                detail=f"未知的 demo_id: {request.demo_id}. 可用选项: basic-chat, deepagents"
+            )
+
+        return {
+            "status": "success",
+            "message": "对话历史已清空",
+            "session_id": request.session_id,
+            "demo_id": request.demo_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 清空历史失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/chat/history", tags=["聊天"])
+async def get_chat_history(
+    session_id: str,
+    demo_id: str = "deepagents"
+):
+    """
+    获取指定会话的历史消息记录
+
+    Args:
+        session_id: 会话 ID
+        demo_id: Demo ID（默认 deepagents）
+
+    Returns:
+        历史消息列表，前端 Message 格式
+    """
+    from langchain_core.messages import HumanMessage, AIMessage
+    from agents import get_orchestrator_with_checkpointer
+    from common.session_manager import get_session_manager
+
+    try:
+        logger.info(f"📜 收到历史请求: demo={demo_id}, session={session_id}")
+
+        # Basic Chat 使用内存存储，无法获取历史
+        if demo_id == "basic-chat":
+            return []
+
+        # DeepAgents 从 checkpoint 读取历史
+        elif demo_id == "deepagents":
+            session_manager = get_session_manager()
+            config = await session_manager.get_config(session_id, demo_id)
+
+            # 直接使用 checkpointer 获取历史
+            checkpointer = await session_manager._ensure_checkpointer()
+            checkpoint_tuple = await checkpointer.aget_tuple(config)
+
+            if not checkpoint_tuple:
+                logger.info(f"📭 无历史记录: session={session_id}")
+                return []
+
+            # 提取消息历史
+            messages = checkpoint_tuple.checkpoint.get("channel_values", {}).get("messages", [])
+
+            # 转换为前端格式
+            history = []
+            for i, msg in enumerate(messages):
+                # 处理字典格式的消息（LangChain .dict() 格式）
+                if isinstance(msg, dict):
+                    msg_type = msg.get("type", "")
+
+                    # LangChain 格式: type="human" -> user
+                    if msg_type == "human":
+                        content = msg.get("content", "")
+                        if content:
+                            history.append({
+                                "id": f"history-{i}",
+                                "role": "user",
+                                "content": content,
+                                "timestamp": 0
+                            })
+
+                    # LangChain 格式: type="ai" -> assistant
+                    elif msg_type == "ai":
+                        content = msg.get("content", "")
+                        # 跳过空内容的 AI 消息（纯工具调用）
+                        if content and content.strip():
+                            history.append({
+                                "id": f"history-{i}",
+                                "role": "assistant",
+                                "content": content,
+                                "timestamp": 0
+                            })
+
+                    # 跳过 tool 消息和其他类型
+
+                # 处理 LangChain BaseMessage 对象
+                else:
+                    msg_type = type(msg).__name__
+
+                    # HumanMessage -> user
+                    if isinstance(msg, HumanMessage):
+                        content = msg.content if hasattr(msg, 'content') else str(msg)
+                        if content:  # 跳过空内容
+                            history.append({
+                                "id": f"history-{i}",
+                                "role": "user",
+                                "content": content,
+                                "timestamp": 0
+                            })
+
+                    # AIMessage -> assistant（跳过 tool 消息）
+                    elif isinstance(msg, AIMessage):
+                        # 跳过纯工具调用消息（没有实际内容）
+                        content = msg.content if hasattr(msg, 'content') else ""
+                        if not content or content.strip() == "":
+                            continue
+
+                        history.append({
+                            "id": f"history-{i}",
+                            "role": "assistant",
+                            "content": content,
+                            "timestamp": 0
+                        })
+
+            logger.info(f"✅ 获取历史成功: {len(history)} 条消息")
+            return history
+
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"未知的 demo_id: {demo_id}. 可用选项: basic-chat, deepagents"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 获取历史失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ==================== 启动服务器 ====================

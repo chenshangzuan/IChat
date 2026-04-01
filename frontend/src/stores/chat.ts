@@ -1,10 +1,11 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import {
   sendMessage,
   sendMessageStream,
   clearHistory as clearHistoryApi,
   getDemos,
+  getHistory,
   type AgentMetadata
 } from '@/api/chat'
 
@@ -25,11 +26,34 @@ export interface Demo {
 }
 
 export const useChatStore = defineStore('chat', () => {
+  // 从 localStorage 读取或生成 sessionId
+  const storedSessionId = localStorage.getItem('ichat_session_id')
+
+  // 如果有存储的值，使用它；否则生成新的
+  let initialSessionId: string
+  if (storedSessionId) {
+    initialSessionId = storedSessionId
+    console.log('[ChatStore] 恢复已有 sessionId:', initialSessionId)
+  } else {
+    initialSessionId = `session-${Date.now()}`
+    localStorage.setItem('ichat_session_id', initialSessionId)
+    console.log('[ChatStore] 生成新的 sessionId:', initialSessionId)
+  }
+
+  const sessionId = ref(initialSessionId)
+
   // 状态
   const currentDemo = ref<string>('deepagents')
   const demos = ref<Demo[]>([])
   const isLoading = ref(false)
-  const sessionId = ref(`session-${Date.now()}`)
+
+  // 监听 sessionId 变化，自动持久化到 localStorage
+  watch(sessionId, (newId) => {
+    if (newId !== initialSessionId) {
+      localStorage.setItem('ichat_session_id', newId)
+      console.log('[ChatStore] 更新 sessionId:', newId)
+    }
+  })
 
   // 为每个 demo 维护独立的消息历史
   // 使用 Map 结构：demo_id -> Message[]
@@ -52,8 +76,38 @@ export const useChatStore = defineStore('chat', () => {
           demoMessages.value.set(demo.id, [])
         }
       })
+
+      // 自动加载当前 demo 的历史记录
+      await loadHistory()
     } catch (error) {
       console.error('Failed to load demos:', error)
+    }
+  }
+
+  async function loadHistory() {
+    try {
+      // 从后端加载历史消息
+      const history = await getHistory(sessionId.value, currentDemo.value)
+
+      // 转换为 Message 格式
+      const messages: Message[] = history.map((msg, index) => ({
+        id: msg.id || `history-${index}`,
+        role: msg.role,
+        content: msg.content,
+        timestamp: msg.timestamp || Date.now()
+      }))
+
+      // 恢复到当前 demo 的消息历史
+      if (messages.length > 0) {
+        demoMessages.value.set(currentDemo.value, messages)
+        console.log(`[ChatStore] 已加载 ${messages.length} 条历史消息`)
+      }
+    } catch (error) {
+      console.error('Failed to load history:', error)
+      // 如果加载失败，保持空数组
+      if (!demoMessages.value.has(currentDemo.value)) {
+        demoMessages.value.set(currentDemo.value, [])
+      }
     }
   }
 
@@ -126,11 +180,11 @@ export const useChatStore = defineStore('chat', () => {
 
   async function clearHistory() {
     try {
-      await clearHistoryApi(sessionId.value)
+      await clearHistoryApi(sessionId.value, currentDemo.value)
       // 只清空当前 demo 的历史
       demoMessages.value.set(currentDemo.value, [])
-      // 生成新的 sessionId
-      sessionId.value = `session-${Date.now()}`
+      // 注意：不再重新生成 sessionId，保持连续性
+      // 这样页面刷新后仍然使用同一个 session，可以恢复历史
     } catch (error) {
       console.error('Failed to clear history:', error)
       throw error
@@ -157,6 +211,7 @@ export const useChatStore = defineStore('chat', () => {
     sessionId,
     demoMessages,  // 暴露给外部访问
     loadDemos,
+    loadHistory,
     sendMessageAndReceive,
     clearHistory,
     switchDemo,

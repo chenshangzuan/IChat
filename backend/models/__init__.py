@@ -205,7 +205,7 @@ class ZhipuChatModel(BaseChatModel):
         return "zhipu-chat"
 
 
-def get_zhipu_model(model: str = "glm-4", temperature: float = 0.7):
+def get_zhipu_model(model: str = "glm-4", temperature: float = 0.2):
     """
     获取智谱 AI 模型
 
