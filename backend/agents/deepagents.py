@@ -166,18 +166,21 @@ Then provide your detailed response following the relevant skill's format.
 
 
 # 创建主 Orchestrator Agent
-def create_orchestrator(checkpointer=None):
+def create_orchestrator(checkpointer=None, store=None):
     """
     创建主协调器 Agent，管理 Coder 和 SRE 子代理
 
     Args:
-        checkpointer: LangGraph checkpointer 实例（可选，用于会话记忆）
+        checkpointer: LangGraph checkpointer 实例（用于会话记忆）
+        store: LangGraph store 实例（用于长期记忆）
     """
 
     logger.info("=" * 60)
     logger.info("🚀 [Agents] 正在创建 Orchestrator Agent...")
     if checkpointer:
         logger.info(f"📝 [Agents] 已启用 checkpointer: {type(checkpointer).__name__}")
+    if store:
+        logger.info(f"📦 [Agents] 已启用 store: {type(store).__name__}")
 
     system_prompt = """You are an Orchestrator agent managing a team of specialist AI agents.
 
@@ -197,7 +200,6 @@ You MAY and SHOULD answer directly when users ask:
 For these questions, provide a helpful overview of the system and your available specialists.
 
 ## 🚫 STRICTLY FORBIDDEN:
-- **NEVER** use `write_file`, `write_todos`, or any other tool directly
 - **NEVER** write code yourself - ALWAYS delegate to coder-agent
 - **DO answer** capability questions yourself - DON'T delegate those
 
@@ -296,14 +298,18 @@ You are a **COORDINATOR**, not a **DOER**. Your value comes from correctly deleg
     logger.info(f"  - {coder_subagent['name']}: {coder_subagent['description'][:50]}...")
     logger.info(f"  - {sre_subagent['name']}: {sre_subagent['description'][:50]}...")
 
-    # 暂时不使用 FilesystemBackend，使用默认配置
-    # 子代理的 skills 将通过 SubAgentMiddleware 加载
+    # 导入 backend 工厂
+    from agents.backend_factory import make_backend
+
+    # 创建 agent，支持长期记忆和混合存储后端
     agent = create_deep_agent(
         model=default_llm,
         subagents=[coder_subagent, sre_subagent],
         system_prompt=system_prompt,
-        debug=False,  # 关闭调试模式以提高性能
-        checkpointer=checkpointer,  # 会话记忆支持
+        debug=False,
+        checkpointer=checkpointer,      # 会话记忆支持
+        store=store,                    # 长期记忆支持
+        backend=make_backend,           # 混合存储后端
     )
 
     # 打印 agent 的图信息
@@ -314,6 +320,29 @@ You are a **COORDINATOR**, not a **DOER**. Your value comes from correctly deleg
     logger.info("=" * 60)
 
     return agent
+
+
+async def create_orchestrator_with_store(checkpointer=None):
+    """
+    创建带长期记忆的 Orchestrator Agent
+
+    支持 Checkpoint（会话状态）和 Store（长期记忆）的混合存储策略。
+
+    Args:
+        checkpointer: LangGraph checkpointer 实例（可选）
+
+    Returns:
+        配置了 store 和 backend 的 orchestrator agent
+    """
+    from common.store_manager import get_store_manager
+
+    store_manager = get_store_manager()
+    store = await store_manager.get_store()
+
+    return create_orchestrator(
+        checkpointer=checkpointer,
+        store=store
+    )
 
 
 # 全局实例

@@ -96,12 +96,15 @@ class SessionManager:
             demo_id: Demo ID
 
         Returns:
-            LangGraph 配置字典，包含 thread_id
+            LangGraph 配置字典，包含 thread_id 和 recursion_limit
         """
         # 确保 checkpointer 已初始化
         await self._ensure_checkpointer()
         thread_id = f"{demo_id}:{session_id}"
-        return {"configurable": {"thread_id": thread_id}}
+        return {
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": 50  # 限制工具调用循环次数，防止无限循环
+        }
 
     async def clear_session(self, session_id: str, demo_id: str):
         """

@@ -387,7 +387,16 @@ async def get_chat_history(
                                 "timestamp": 0
                             })
 
-                    # 跳过 tool 消息和其他类型
+                    # LangChain 格式: type="tool" -> assistant (子代理的完整回答)
+                    elif msg_type == "tool":
+                        content = msg.get("content", "")
+                        if content and content.strip():
+                            history.append({
+                                "id": f"history-{i}",
+                                "role": "assistant",
+                                "content": content,
+                                "timestamp": 0
+                            })
 
                 # 处理 LangChain BaseMessage 对象
                 else:

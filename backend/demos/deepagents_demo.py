@@ -11,7 +11,7 @@ import sys
 import asyncio
 import json
 
-from agents import get_orchestrator_with_checkpointer
+from agents import get_orchestrator_with_store
 from agents.skill_tracking_middleware import (
     clear_skill_calls_context,
 )
@@ -91,7 +91,7 @@ async def chat_response(user_input: str, session_id: str = "default") -> str:
     """
     # 获取会话管理器和 orchestrator
     session_manager = get_session_manager()
-    orchestrator = await get_orchestrator_with_checkpointer()
+    orchestrator = await get_orchestrator_with_store()
 
     # 创建跟踪器
     tracker = AgentTracker(session_id)
@@ -186,7 +186,7 @@ async def chat_response_with_metadata(user_input: str, session_id: str = "defaul
     """
     # 获取会话管理器和 orchestrator
     session_manager = get_session_manager()
-    orchestrator = await get_orchestrator_with_checkpointer()
+    orchestrator = await get_orchestrator_with_store()
 
     # 创建跟踪器
     tracker = AgentTracker(session_id)
@@ -247,7 +247,7 @@ async def chat_stream(user_input: str, session_id: str = "default") -> AsyncIter
     """
     # 获取会话管理器和 orchestrator
     session_manager = get_session_manager()
-    orchestrator = await get_orchestrator_with_checkpointer()
+    orchestrator = await get_orchestrator_with_store()
 
     # 获取会话配置（包含 thread_id）
     config = await session_manager.get_config(session_id, "deepagents")
@@ -278,7 +278,7 @@ async def chat_stream_with_metadata(user_input: str, session_id: str = "default"
     """
     # 获取会话管理器和 orchestrator
     session_manager = get_session_manager()
-    orchestrator = await get_orchestrator_with_checkpointer()
+    orchestrator = await get_orchestrator_with_store()
 
     # 清空上下文变量，为新的请求准备
     clear_skill_calls_context()
