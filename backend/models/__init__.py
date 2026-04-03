@@ -37,7 +37,7 @@ def get_openrouter_model(model: str = "openai/gpt-oss-20b:free", temperature: fl
 class ZhipuChatModel(BaseChatModel):
     """智谱 AI 自定义 ChatModel，正确处理 id.secret 格式的 API Key"""
 
-    model: str = "glm-4"  # 使用 GLM-4 而不是 glm-4-flash
+    model: str = "glm-4.5-air"
     temperature: float = 0.7
     api_key: str = ""
     _bound_tools: Optional[List[dict]] = None
@@ -152,7 +152,8 @@ class ZhipuChatModel(BaseChatModel):
             timeout=300.0,  # 5 分钟超时，与前端保持一致
         ) as client:
             response = await client.post(
-                "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+                # "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+                "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
                 json=request_body,
             )
 
@@ -205,12 +206,12 @@ class ZhipuChatModel(BaseChatModel):
         return "zhipu-chat"
 
 
-def get_zhipu_model(model: str = "glm-4", temperature: float = 0.2):
+def get_zhipu_model(model: str = "glm-4.7", temperature: float = 0.7):
     """
     获取智谱 AI 模型
 
     Args:
-        model: 模型名称（默认 glm-4，也可使用 glm-4-plus, glm-4-air, glm-4-flash 等）
+        model: 模型名称（默认 glm-4.5-air，也可使用 glm-4-plus, glm-4-air, glm-4-flash 等）
         temperature: 温度参数
 
     Returns:

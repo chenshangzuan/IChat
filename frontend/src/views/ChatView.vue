@@ -4,9 +4,7 @@
     <aside class="demo-list-sidebar">
       <div class="sidebar-header">
         <h2>
-          <el-icon :size="18" class="title-icon">
-            <ChatDotRound />
-          </el-icon>
+          <img src="@/assets/ai_bot_transparent.png" class="title-icon" alt="AI Bot" />
           IChat
         </h2>
       </div>
@@ -40,7 +38,10 @@
       <!-- 历史聊天列表（占位） -->
       <div class="history-section" v-if="showHistory">
         <div class="section-header" @click="toggleHistory">
-          <span>历史聊天</span>
+          <div class="section-title">
+            <el-icon :size="18"><Clock /></el-icon>
+            <span>历史聊天</span>
+          </div>
           <el-icon :class="{ 'rotated': historyExpanded }">
             <ArrowDown />
           </el-icon>
@@ -71,11 +72,8 @@
       <!-- 消息列表 -->
       <div class="messages-container" ref="messagesContainer">
         <div v-if="!chatStore.hasMessages" class="empty-state">
-          <el-icon :size="64" color="#909399">
-            <ChatDotRound />
-          </el-icon>
-          <h3>开始对话</h3>
-          <p>选择一个 demo，然后输入消息开始聊天</p>
+          <img src="@/assets/ai.png" class="empty-icon" alt="AI" />
+          <h3>与 AI 一起，重新定义创造</h3>
         </div>
 
         <div v-else class="messages">
@@ -398,7 +396,9 @@ onMounted(() => {
 }
 
 .demo-list-sidebar .title-icon {
-  color: #7C3AED;
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
 }
 
 .demo-list-sidebar .demo-list {
@@ -484,7 +484,8 @@ onMounted(() => {
 .chat-sidebar.collapsed .new-chat-item,
 .chat-sidebar.collapsed .section-header {
   padding: 14px 0;
-  justify-content: center;
+  justify-content: center !important;
+  display: flex;
 }
 
 .chat-sidebar.collapsed .new-chat-item {
@@ -495,12 +496,30 @@ onMounted(() => {
   padding: 14px 0;
 }
 
+.chat-sidebar.collapsed .section-header .section-title {
+  justify-content: center;
+  width: 100%;
+  margin: 0;
+}
+
 .chat-sidebar.collapsed .section-header .el-icon {
   margin: 0;
 }
 
 /* 收起时隐藏历史聊天的展开箭头 */
 .chat-sidebar.collapsed .section-header > .el-icon:last-child {
+  display: none;
+}
+
+/* 收起时 section-title 占满宽度并居中图标 */
+.chat-sidebar.collapsed .section-header .section-title {
+  width: 100%;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+}
+
+.chat-sidebar.collapsed .section-header .section-title span {
   display: none;
 }
 
@@ -566,7 +585,10 @@ onMounted(() => {
 }
 
 .new-chat-item .el-icon {
+  width: 18px;
   flex-shrink: 0;
+  display: flex;
+  justify-content: center;
 }
 
 /* 历史聊天区域 */
@@ -584,6 +606,19 @@ onMounted(() => {
   font-size: 14px;
   font-weight: 500;
   transition: background 0.2s;
+}
+
+.history-section .section-header .section-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.history-section .section-header .section-title .el-icon {
+  width: 18px;
+  display: flex;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
 .history-section .section-header span {
@@ -640,9 +675,17 @@ onMounted(() => {
   color: #909399;
 }
 
+.empty-icon {
+  width: 120px;
+  height: 120px;
+  object-fit: contain;
+}
+
 .empty-state h3 {
-  margin: 16px 0 8px;
+  font-size: 18px;
   font-weight: 500;
+  color: #64748B;
+  margin-top: 16px;
 }
 
 .empty-state p {
