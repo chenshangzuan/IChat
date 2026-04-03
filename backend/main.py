@@ -330,7 +330,7 @@ async def get_chat_history(
     Returns:
         历史消息列表，前端 Message 格式
     """
-    from langchain_core.messages import HumanMessage, AIMessage
+    from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
     from agents import get_orchestrator_with_checkpointer
     from common.session_manager import get_session_manager
 
@@ -387,15 +387,20 @@ async def get_chat_history(
                                 "timestamp": 0
                             })
 
-                    # LangChain 格式: type="tool" -> assistant (子代理的完整回答)
+                    # LangChain 格式: type="tool" -> tool 消息
                     elif msg_type == "tool":
                         content = msg.get("content", "")
+                        tool_name = msg.get("name", "unknown_tool")
                         if content and content.strip():
                             history.append({
                                 "id": f"history-{i}",
-                                "role": "assistant",
+                                "role": "tool",
                                 "content": content,
-                                "timestamp": 0
+                                "timestamp": 0,
+                                "toolInfo": {
+                                    "toolName": tool_name,
+                                    "status": "completed"
+                                }
                             })
 
                 # 处理 LangChain BaseMessage 对象
@@ -413,7 +418,7 @@ async def get_chat_history(
                                 "timestamp": 0
                             })
 
-                    # AIMessage -> assistant（跳过 tool 消息）
+                    # AIMessage -> assistant（跳过纯工具调用消息）
                     elif isinstance(msg, AIMessage):
                         # 跳过纯工具调用消息（没有实际内容）
                         content = msg.content if hasattr(msg, 'content') else ""
@@ -426,6 +431,22 @@ async def get_chat_history(
                             "content": content,
                             "timestamp": 0
                         })
+
+                    # ToolMessage -> tool 消息
+                    elif isinstance(msg, ToolMessage):
+                        content = msg.content if hasattr(msg, 'content') else ""
+                        tool_name = msg.name if hasattr(msg, 'name') else "unknown_tool"
+                        if content and content.strip():
+                            history.append({
+                                "id": f"history-{i}",
+                                "role": "tool",
+                                "content": content,
+                                "timestamp": 0,
+                                "toolInfo": {
+                                    "toolName": tool_name,
+                                    "status": "completed"
+                                }
+                            })
 
             logger.info(f"✅ 获取历史成功: {len(history)} 条消息")
             return history

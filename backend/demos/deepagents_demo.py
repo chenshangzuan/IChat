@@ -78,6 +78,32 @@ def detect_agent(response: str) -> str:
     return "orchestrator"
 
 
+def extract_tool_calls_detail(messages: list) -> list[dict]:
+    """
+    从消息历史中提取工具调用详情
+
+    Args:
+        messages: 消息历史列表
+
+    Returns:
+        工具调用详情列表，每个包含 tool_name, output, status
+    """
+    tool_details = []
+    for msg in messages:
+        if hasattr(msg, 'type') and msg.type == 'tool':
+            tool_name = getattr(msg, 'name', 'unknown_tool')
+            content = msg.content if hasattr(msg, 'content') else ""
+            # 截断过长的输出
+            if len(content) > 1000:
+                content = content[:1000] + "...(已截断)"
+            tool_details.append({
+                "tool_name": tool_name,
+                "output": content,
+                "status": "completed"
+            })
+    return tool_details
+
+
 async def chat_response(user_input: str, session_id: str = "default") -> str:
     """
     非流式聊天响应
@@ -310,17 +336,36 @@ async def chat_stream_with_metadata(user_input: str, session_id: str = "default"
             message = chunk[0]  # AIMessage
             # 收集消息用于分析
             all_messages.append(message)
-            # 提取内容块并输出
-            if hasattr(message, 'content') and message.content:
-                # 将大块内容拆分为更小的块，实现更好的流式体验
+
+            # 获取消息类型
+            msg_type = getattr(message, 'type', 'unknown')
+            logger.debug(f"  流式消息类型: {msg_type}")
+
+            if msg_type == 'ai' and hasattr(message, 'content') and message.content:
+                # AI 消息：发送文本事件
                 content = message.content
                 # 每 50 个字符为一个块，模拟打字效果
                 for i in range(0, len(content), 50):
                     yield content[i:i+50]
-                    # 添加短暂延迟（20ms），让流式效果更明显
                     await asyncio.sleep(0.02)
+            elif msg_type == 'tool':
+                # 工具消息：发送独立的工具事件（单独一行，便于前端解析）
+                tool_name = getattr(message, 'name', 'unknown_tool')
+                tool_content = message.content if hasattr(message, 'content') else ""
+                # 截断过长的输出
+                if len(tool_content) > 1000:
+                    tool_content = tool_content[:1000] + "...(已截断)"
+                # 发送工具事件（单独一行，使用 __EVENT__ 前缀）
+                tool_event = json.dumps({
+                    "type": "tool_call",
+                    "tool_name": tool_name,
+                    "output": tool_content,
+                    "status": "completed"
+                }, ensure_ascii=False)
+                yield f"\n__EVENT__:{tool_event}\n"
+                logger.info(f"  📦 发送工具事件: {tool_name}")
         elif hasattr(chunk, 'content') and chunk.content:
-            # 兼容其他可能的格式
+            # 兼容其他可能的格式（作为 AI 消息处理）
             all_messages.append(chunk)
             content = chunk.content
             for i in range(0, len(content), 50):
@@ -330,15 +375,21 @@ async def chat_stream_with_metadata(user_input: str, session_id: str = "default"
     # 使用跟踪器分析消息历史
     tracker.detect_and_log_tool_calls(all_messages)
 
-    # 找到响应文本
+    # 找到响应文本（优先使用 ai 类型消息，排除 tool 类型）
     response_content = ""
-    for msg in all_messages:
+    # 反向遍历，找到最后一条 ai 类型的消息
+    for msg in reversed(all_messages):
         msg_type = getattr(msg, 'type', '')
-        if msg_type == 'tool' and hasattr(msg, 'content'):
+        if msg_type == 'ai' and hasattr(msg, 'content') and msg.content:
             response_content = msg.content
             break
+    # 如果没有找到 ai 消息，使用最后一条非 tool 消息
     if not response_content and all_messages:
-        response_content = all_messages[-1].content if hasattr(all_messages[-1], 'content') else ""
+        for msg in reversed(all_messages):
+            msg_type = getattr(msg, 'type', '')
+            if msg_type != 'tool' and hasattr(msg, 'content') and msg.content:
+                response_content = msg.content
+                break
 
     # 检测 agent 类型
     detected_agent = detect_agent(response_content)
@@ -352,6 +403,9 @@ async def chat_stream_with_metadata(user_input: str, session_id: str = "default"
     skill_calls_data = tracker_summary.get("skill_calls", [])
     skill_names = [call.get("skill_name", "") for call in skill_calls_data if call.get("skill_name")]
 
+    # 提取工具调用详情
+    tool_calls_detail = extract_tool_calls_detail(all_messages)
+
     # 构建元数据
     metadata = {
         "agent_type": detected_agent,
@@ -359,7 +413,8 @@ async def chat_stream_with_metadata(user_input: str, session_id: str = "default"
         "tool_calls": tracker_summary.get("tool_call_count", 0),
         "skill_calls": tracker_summary.get("skill_call_count", 0),
         "skills": skill_names,
-        "duration": tracker_summary.get("duration", 0.0)
+        "duration": tracker_summary.get("duration", 0.0),
+        "tool_calls_detail": tool_calls_detail  # 新增：工具调用详情
     }
 
     logger.info("=" * 60)

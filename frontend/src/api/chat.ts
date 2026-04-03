@@ -9,6 +9,15 @@ const api = axios.create({
 })
 
 /**
+ * 工具调用详情
+ */
+export interface ToolCallDetail {
+  tool_name: string   // 工具名称
+  output: string      // 工具输出内容
+  status: string      // 状态：completed, failed
+}
+
+/**
  * Agent 元数据（Multi-Agent System）
  */
 export interface AgentMetadata {
@@ -18,6 +27,7 @@ export interface AgentMetadata {
   skill_calls: number  // skill 调用次数
   skills: string[]  // 使用的 skill 名称列表
   duration: number  // 耗时（秒）
+  tool_calls_detail?: ToolCallDetail[]  // 工具调用详情列表
 }
 
 /**
@@ -113,9 +123,14 @@ export async function clearHistory(
  */
 export interface HistoryMessage {
   id: string
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'tool'
   content: string
   timestamp: number
+  toolInfo?: {
+    toolName: string
+    status: string
+  }
+  agentMetadata?: AgentMetadata
 }
 
 export async function getHistory(

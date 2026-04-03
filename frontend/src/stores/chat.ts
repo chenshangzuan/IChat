@@ -6,15 +6,20 @@ import {
   clearHistory as clearHistoryApi,
   getDemos,
   getHistory,
-  type AgentMetadata
+  type AgentMetadata,
+  type ToolCallDetail
 } from '@/api/chat'
 
 export interface Message {
   id: string
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'tool'  // 新增 tool 角色
   content: string
   timestamp: number
-  agentMetadata?: AgentMetadata  // 新增：agent 元数据（仅 deepagents demo）
+  agentMetadata?: AgentMetadata  // agent 元数据（仅 deepagents demo）
+  toolInfo?: {               // 工具信息（仅 tool 角色）
+    toolName: string
+    status: string
+  }
 }
 
 export interface Demo {
@@ -89,12 +94,16 @@ export const useChatStore = defineStore('chat', () => {
       // 从后端加载历史消息
       const history = await getHistory(sessionId.value, currentDemo.value)
 
-      // 转换为 Message 格式
+      // 转换为 Message 格式，保留所有字段
       const messages: Message[] = history.map((msg, index) => ({
         id: msg.id || `history-${index}`,
         role: msg.role,
         content: msg.content,
-        timestamp: msg.timestamp || Date.now()
+        timestamp: msg.timestamp || Date.now(),
+        // 保留工具信息
+        toolInfo: msg.toolInfo,
+        // 保留 agent 元数据
+        agentMetadata: msg.agentMetadata
       }))
 
       // 恢复到当前 demo 的消息历史
@@ -128,51 +137,163 @@ export const useChatStore = defineStore('chat', () => {
     }
     currentMessages.push(userMsg)
 
-    // 创建一个空的助手消息，用于流式更新
-    const assistantMsg: Message = {
-      id: `assistant-${Date.now()}`,
-      role: 'assistant',
-      content: '',
-      timestamp: Date.now(),
-    }
-    currentMessages.push(assistantMsg)
     isLoading.value = true
 
-    try {
-      // 所有 demo 都使用流式接收响应
-      // deepagents 会在流结束时发送元数据标记
-      let fullContent = ''
+    // 流式处理状态
+    let currentAssistantMsg: Message | null = null
+    let currentContent = ''
+    let streamedMetadata: AgentMetadata | undefined
+    let buffer = ''
+    let assistantMsgCount = 0
 
+    try {
       await sendMessageStream(
         userMessage,
         (chunk) => {
-          // 检查是否是元数据标记
-          if (chunk.includes('__METADATA__:')) {
-            // 提取元数据
-            const metadataMatch = chunk.match(/__METADATA__:(.+)$/)
-            if (metadataMatch) {
-              try {
-                const metadata = JSON.parse(metadataMatch[1])
-                // 保存 agent 元数据
-                assistantMsg.agentMetadata = metadata
-                // 移除元数据标记（不显示在内容中）
-                assistantMsg.content = fullContent.replace(/__METADATA__:.+$/, '').trim()
-              } catch (e) {
-                console.error('Failed to parse metadata:', e)
-                assistantMsg.content = fullContent + chunk
+          buffer += chunk
+
+          // 处理 __EVENT__ 标记
+          let eventIdx: number
+          while ((eventIdx = buffer.indexOf('\n__EVENT__:')) !== -1) {
+            // 提取事件前的普通内容
+            const beforeEvent = buffer.substring(0, eventIdx)
+            buffer = buffer.substring(eventIdx + 1) // 保留 __EVENT__:
+
+            // 添加普通内容到当前助手消息
+            if (beforeEvent) {
+              currentContent += beforeEvent
+              if (!currentAssistantMsg) {
+                assistantMsgCount++
+                currentAssistantMsg = {
+                  id: `assistant-${Date.now()}-${assistantMsgCount}`,
+                  role: 'assistant',
+                  content: currentContent,
+                  timestamp: Date.now(),
+                }
+                currentMessages.push(currentAssistantMsg)
+              } else {
+                currentAssistantMsg.content = currentContent
               }
             }
-          } else {
-            // 普通内容，累加并显示
-            fullContent += chunk
-            assistantMsg.content = fullContent
+
+            // 解析事件
+            const eventEndIdx = buffer.indexOf('\n', 10) // 跳过 "__EVENT__:"
+            if (eventEndIdx !== -1) {
+              const eventLine = buffer.substring(0, eventEndIdx)
+              buffer = buffer.substring(eventEndIdx + 1)
+
+              try {
+                const eventData = JSON.parse(eventLine.substring('__EVENT__:'.length))
+                if (eventData.type === 'tool_call') {
+                  // 工具调用时，结束当前助手消息
+                  if (currentAssistantMsg) {
+                    currentAssistantMsg.content = currentContent.trim()
+                    currentAssistantMsg = null
+                    currentContent = ''
+                  }
+
+                  // 创建工具消息
+                  const toolMsg: Message = {
+                    id: `tool-${Date.now()}-${assistantMsgCount}`,
+                    role: 'tool',
+                    content: eventData.output,
+                    timestamp: Date.now(),
+                    toolInfo: {
+                      toolName: eventData.tool_name,
+                      status: eventData.status
+                    }
+                  }
+                  currentMessages.push(toolMsg)
+                  console.log(`[ChatStore] 收到工具事件: ${eventData.tool_name}`)
+                }
+              } catch (e) {
+                console.error('Failed to parse event:', e, eventLine)
+              }
+            }
+          }
+
+          // 处理 __METADATA__ 标记
+          let metaIdx: number
+          while ((metaIdx = buffer.indexOf('\n__METADATA__:')) !== -1) {
+            const beforeMeta = buffer.substring(0, metaIdx)
+            buffer = buffer.substring(metaIdx + 1)
+
+            // 添加普通内容
+            if (beforeMeta) {
+              currentContent += beforeMeta
+              if (!currentAssistantMsg) {
+                assistantMsgCount++
+                currentAssistantMsg = {
+                  id: `assistant-${Date.now()}-${assistantMsgCount}`,
+                  role: 'assistant',
+                  content: currentContent,
+                  timestamp: Date.now(),
+                }
+                currentMessages.push(currentAssistantMsg)
+              } else {
+                currentAssistantMsg.content = currentContent
+              }
+            }
+
+            // 解析元数据
+            const metaEndIdx = buffer.indexOf('\n', 13)
+            if (metaEndIdx !== -1) {
+              const metaLine = buffer.substring(0, metaEndIdx)
+              buffer = buffer.substring(metaEndIdx + 1)
+
+              try {
+                streamedMetadata = JSON.parse(metaLine.substring('__METADATA__:'.length))
+                if (currentAssistantMsg) {
+                  currentAssistantMsg.agentMetadata = streamedMetadata
+                }
+              } catch (e) {
+                console.error('Failed to parse metadata:', e)
+              }
+            }
+          }
+
+          // 剩余的 buffer 作为普通内容（实时显示）
+          if (buffer && !buffer.includes('__EVENT__:') && !buffer.includes('__METADATA__:')) {
+            currentContent += buffer
+            buffer = ''
+            if (!currentAssistantMsg) {
+              assistantMsgCount++
+              currentAssistantMsg = {
+                id: `assistant-${Date.now()}-${assistantMsgCount}`,
+                role: 'assistant',
+                content: currentContent,
+                timestamp: Date.now(),
+              }
+              currentMessages.push(currentAssistantMsg)
+            } else {
+              currentAssistantMsg.content = currentContent
+            }
           }
         },
         sessionId.value,
         currentDemo.value
       )
+
+      // 流式结束后，确保最后的内容已更新
+      if (currentAssistantMsg) {
+        currentAssistantMsg.content = currentContent.trim()
+        if (streamedMetadata) {
+          currentAssistantMsg.agentMetadata = streamedMetadata
+        }
+      }
+
     } catch (error) {
-      assistantMsg.content = `错误: ${error instanceof Error ? error.message : '未知错误'}`
+      const errorMsg = `错误: ${error instanceof Error ? error.message : '未知错误'}`
+      if (currentAssistantMsg) {
+        currentAssistantMsg.content = errorMsg
+      } else {
+        currentMessages.push({
+          id: `assistant-${Date.now()}-error`,
+          role: 'assistant',
+          content: errorMsg,
+          timestamp: Date.now(),
+        })
+      }
     } finally {
       isLoading.value = false
     }

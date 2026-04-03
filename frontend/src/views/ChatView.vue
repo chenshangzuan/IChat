@@ -83,58 +83,87 @@
             class="message"
             :class="message.role"
           >
-            <div class="message-avatar">
-              <el-icon v-if="message.role === 'user'" :size="20">
-                <User />
-              </el-icon>
-              <el-icon v-else :size="20">
-                <Service />
-              </el-icon>
-            </div>
-            <div class="message-content">
-              <!-- Agent 徽章和元数据（仅 deepagents demo） -->
-              <div v-if="message.role === 'assistant' && message.agentMetadata" class="agent-metadata">
-                <el-tag :type="getAgentTagType(message.agentMetadata.agent_type)" size="small">
-                  {{ getAgentIcon(message.agentMetadata.agent_type) }} {{ getAgentName(message.agentMetadata.agent_type) }}
-                </el-tag>
-                <div class="agent-stats">
-                  <el-tooltip content="委托次数" placement="top">
-                    <span class="stat-item">
-                      <el-icon><Right /></el-icon>
-                      {{ message.agentMetadata.delegations }}
-                    </span>
-                  </el-tooltip>
-                  <el-tooltip content="工具调用" placement="top">
-                    <span class="stat-item">
-                      <el-icon><Tools /></el-icon>
-                      {{ message.agentMetadata.tool_calls }}
-                    </span>
-                  </el-tooltip>
-                  <el-tooltip content="Skill 调用" placement="top">
-                    <span class="stat-item">
-                      <el-icon><MagicStick /></el-icon>
-                      {{ message.agentMetadata.skill_calls }}
-                    </span>
-                  </el-tooltip>
-                  <el-tooltip v-if="message.agentMetadata.skills.length > 0" :content="`使用的 Skills: ${message.agentMetadata.skills.join(', ')}`" placement="top">
-                    <span class="stat-item skills-badge">
-                      {{ message.agentMetadata.skills.map(s => getSkillIcon(s)).join(' ') }}
-                    </span>
-                  </el-tooltip>
-                  <el-tooltip content="耗时" placement="top">
-                    <span class="stat-item">
-                      <el-icon><Clock /></el-icon>
-                      {{ message.agentMetadata.duration.toFixed(2) }}s
-                    </span>
-                  </el-tooltip>
+            <!-- 工具消息渲染（作为独立消息单元） -->
+            <template v-if="message.role === 'tool'">
+              <div class="message-avatar tool-avatar">
+                <el-icon :size="20">
+                  <Tools />
+                </el-icon>
+              </div>
+              <div class="message-content">
+                <div class="tool-call-card" @click="toggleToolExpand(message.id)">
+                  <div class="tool-card-header">
+                    <span class="tool-icon-text">{{ getToolIcon(message.toolInfo?.toolName) }}</span>
+                    <span class="tool-card-name">{{ formatToolName(message.toolInfo?.toolName) }}</span>
+                    <el-tag size="small" :type="getToolStatusType(message.toolInfo?.status)">
+                      {{ message.toolInfo?.status === 'completed' ? '完成' : message.toolInfo?.status }}
+                    </el-tag>
+                    <el-icon class="expand-icon" :class="{ expanded: isToolExpanded(message.id) }">
+                      <ArrowDown />
+                    </el-icon>
+                  </div>
+                  <div class="tool-card-output" v-show="isToolExpanded(message.id)">
+                    <pre>{{ message.content }}</pre>
+                  </div>
                 </div>
               </div>
+            </template>
 
-              <div class="message-text" v-html="renderMarkdown(message.content)"></div>
-              <div class="message-time">
-                {{ formatTime(message.timestamp) }}
+            <!-- 用户/助手消息渲染 -->
+            <template v-else>
+              <div class="message-avatar">
+                <el-icon v-if="message.role === 'user'" :size="20">
+                  <User />
+                </el-icon>
+                <el-icon v-else :size="20">
+                  <Service />
+                </el-icon>
               </div>
-            </div>
+              <div class="message-content">
+                <!-- Agent 徽章和元数据（仅 deepagents demo） -->
+                <div v-if="message.role === 'assistant' && message.agentMetadata" class="agent-metadata">
+                  <el-tag :type="getAgentTagType(message.agentMetadata.agent_type)" size="small">
+                    {{ getAgentIcon(message.agentMetadata.agent_type) }} {{ getAgentName(message.agentMetadata.agent_type) }}
+                  </el-tag>
+                  <div class="agent-stats">
+                    <el-tooltip content="委托次数" placement="top">
+                      <span class="stat-item">
+                        <el-icon><Right /></el-icon>
+                        {{ message.agentMetadata.delegations }}
+                      </span>
+                    </el-tooltip>
+                    <el-tooltip content="工具调用" placement="top">
+                      <span class="stat-item">
+                        <el-icon><Tools /></el-icon>
+                        {{ message.agentMetadata.tool_calls }}
+                      </span>
+                    </el-tooltip>
+                    <el-tooltip content="Skill 调用" placement="top">
+                      <span class="stat-item">
+                        <el-icon><MagicStick /></el-icon>
+                        {{ message.agentMetadata.skill_calls }}
+                      </span>
+                    </el-tooltip>
+                    <el-tooltip v-if="message.agentMetadata.skills && message.agentMetadata.skills.length > 0" :content="`使用的 Skills: ${message.agentMetadata.skills.join(', ')}`" placement="top">
+                      <span class="stat-item skills-badge">
+                        {{ message.agentMetadata.skills.map(s => getSkillIcon(s)).join(' ') }}
+                      </span>
+                    </el-tooltip>
+                    <el-tooltip content="耗时" placement="top">
+                      <span class="stat-item">
+                        <el-icon><Clock /></el-icon>
+                        {{ message.agentMetadata.duration.toFixed(2) }}s
+                      </span>
+                    </el-tooltip>
+                  </div>
+                </div>
+
+                <div class="message-text" v-html="renderMarkdown(message.content)"></div>
+                <div class="message-time">
+                  {{ formatTime(message.timestamp) }}
+                </div>
+              </div>
+            </template>
           </div>
 
           <!-- 加载中指示器 -->
@@ -318,6 +347,63 @@ function getSkillIcon(skillName: string): string {
     'sre-operations': '🔧',
   }
   return icons[skillName] || '🎨'
+}
+
+// 工具消息展开状态（默认全部展开）
+const expandedTools = ref<Set<string>>(new Set())
+
+// 检查工具是否展开（默认展开）
+function isToolExpanded(toolId: string): boolean {
+  // 如果还没有记录，默认为展开
+  if (!expandedTools.value.has(toolId) && !expandedTools.value.has(`collapsed-${toolId}`)) {
+    return true
+  }
+  // 如果有记录，按记录的状态
+  return expandedTools.value.has(toolId)
+}
+
+function toggleToolExpand(toolId: string) {
+  if (isToolExpanded(toolId)) {
+    // 当前展开，切换为折叠
+    expandedTools.value.delete(toolId)
+    expandedTools.value.add(`collapsed-${toolId}`)
+  } else {
+    // 当前折叠，切换为展开
+    expandedTools.value.delete(`collapsed-${toolId}`)
+    expandedTools.value.add(toolId)
+  }
+}
+
+function getToolIcon(toolName?: string): string {
+  const icons: Record<string, string> = {
+    'coder-agent': '👨‍💻',
+    'sre-agent': '🔧',
+    'file_manager': '📁',
+    'memory_search': '🧠',
+    'task': '🔄',
+    'python_repl': '🐍',
+    'shell': '💻',
+  }
+  return icons[toolName || ''] || '⚙️'
+}
+
+function formatToolName(toolName?: string): string {
+  if (!toolName) return '工具调用'
+  return toolName
+    .replace(/[-_]/g, ' ')
+    .replace(/agent$/i, 'Agent')
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+}
+
+function getToolStatusType(status?: string): '' | 'success' | 'warning' | 'info' | 'danger' {
+  const types: Record<string, '' | 'success' | 'warning' | 'info' | 'danger'> = {
+    'completed': 'success',
+    'initiated': 'info',
+    'failed': 'danger',
+  }
+  return types[status || ''] || 'info'
 }
 
 async function handleSend() {
@@ -757,6 +843,80 @@ onMounted(() => {
   border: 1px solid #EDE9FE;
 }
 
+/* 工具消息样式 */
+.message.tool {
+  margin-bottom: 12px;
+}
+
+.tool-call-container {
+  max-width: 70%;
+  margin-left: 48px;
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 14px;
+}
+
+.tool-header {
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  background: #FFFFFF;
+  border-bottom: 1px solid #E2E8F0;
+  cursor: pointer;
+  transition: background 0.2s;
+  user-select: none;
+}
+
+.tool-header:hover {
+  background: #F1F5F9;
+}
+
+.tool-icon {
+  font-size: 18px;
+  margin-right: 10px;
+}
+
+.tool-title {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tool-name {
+  font-weight: 500;
+  font-size: 14px;
+  color: #334155;
+}
+
+.expand-icon {
+  transition: transform 0.3s;
+  color: #94A3B8;
+}
+
+.expand-icon.expanded {
+  transform: rotate(180deg);
+}
+
+.tool-output {
+  padding: 12px 14px;
+  max-height: 300px;
+  overflow-y: auto;
+  background: #FAFBFC;
+}
+
+.tool-output pre {
+  margin: 0;
+  font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+  font-size: 12px;
+  color: #475569;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
 .message-text :deep(pre) {
   background: #f6f8fa;
   padding: 16px;
@@ -886,6 +1046,83 @@ onMounted(() => {
   display: flex;
   gap: 16px;
   margin-left: auto;
+}
+
+/* 工具消息样式（作为独立消息单元） */
+.message.tool {
+  margin-bottom: 16px;
+}
+
+.message.tool .tool-avatar {
+  background: #F0FDF4;
+  color: #16A34A;
+}
+
+.message.tool .message-content {
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+.tool-call-card {
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tool-call-card:hover {
+  border-color: #CBD5E1;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.tool-card-header {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  background: #FFFFFF;
+  gap: 10px;
+}
+
+.tool-icon-text {
+  font-size: 20px;
+}
+
+.tool-card-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: #1E293B;
+  flex: 1;
+}
+
+.tool-card-header .expand-icon {
+  transition: transform 0.3s;
+  color: #94A3B8;
+  font-size: 14px;
+}
+
+.tool-card-header .expand-icon.expanded {
+  transform: rotate(180deg);
+}
+
+.tool-card-output {
+  padding: 16px;
+  background: #FAFBFC;
+  border-top: 1px solid #E2E8F0;
+}
+
+.tool-card-output pre {
+  margin: 0;
+  font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+  font-size: 13px;
+  color: #475569;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+  max-height: 400px;
+  overflow-y: auto;
 }
 
 .stat-item {
