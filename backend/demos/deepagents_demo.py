@@ -337,6 +337,7 @@ async def chat_stream_with_metadata(user_input: str, session_id: str = "default"
             # 收集消息用于分析
             all_messages.append(message)
 
+            # print("流式消息:", message)
             # 获取消息类型
             msg_type = getattr(message, 'type', 'unknown')
             logger.debug(f"  流式消息类型: {msg_type}")

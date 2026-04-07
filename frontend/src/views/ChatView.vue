@@ -186,41 +186,51 @@
 
       <!-- 输入区域 -->
       <div class="input-area">
-        <el-dropdown
-          v-if="currentPresetQuestions.length > 0"
-          trigger="click"
-          @command="handlePresetQuestion"
-        >
-          <el-button circle :icon="QuestionFilled" title="预设问题" />
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item
-                v-for="question in currentPresetQuestions"
-                :key="question"
-                :command="question"
+        <div class="input-container">
+          <el-input
+            v-model="inputMessage"
+            type="textarea"
+            :rows="1"
+            :autosize="{ minRows: 1, maxRows: 4 }"
+            placeholder="输入消息..."
+            @keydown.enter.exact="handleSend"
+            @keydown.enter.shift.prevent
+            :disabled="chatStore.isLoading"
+          />
+          <div class="input-actions">
+            <div class="actions-left">
+              <el-dropdown
+                v-if="currentPresetQuestions.length > 0"
+                trigger="click"
+                @command="handlePresetQuestion"
               >
-                {{ question }}
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
-        <el-input
-          v-model="inputMessage"
-          type="textarea"
-          :rows="1"
-          :autosize="{ minRows: 1, maxRows: 4 }"
-          placeholder="输入消息..."
-          @keydown.enter.exact="handleSend"
-          @keydown.enter.shift.prevent
-          :disabled="chatStore.isLoading"
-        />
-        <el-button
-          type="primary"
-          :icon="Position"
-          @click="handleSend"
-          :disabled="!inputMessage.trim() || chatStore.isLoading"
-          circle
-        />
+                <el-button circle :icon="QuestionFilled" class="action-btn" title="预设问题" />
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item
+                      v-for="question in currentPresetQuestions"
+                      :key="question"
+                      :command="question"
+                    >
+                      {{ question }}
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
+            <div class="actions-right">
+              <el-button
+                type="primary"
+                :icon="Position"
+                circle
+                @click="handleSend"
+                :disabled="!inputMessage.trim() || chatStore.isLoading"
+                class="send-btn"
+                title="发送消息"
+              />
+            </div>
+          </div>
+        </div>
       </div>
     </main>
   </div>
@@ -269,6 +279,7 @@ const presetQuestionsMap: Record<string, string[]> = {
     '如何部署一个 FastAPI 服务到生产环境？',
     '帮我把这个接口描述规范化：query ai gateway list',
     '帮我把这个接口操作符规范化：zec:elasticIp:listNetworkTypes',
+    '帮我写一首关于元旦节的诗，然后存到/memories/ 目录下',
   ],
   'basic-chat': [
     '什么是 LangChain？',
@@ -1016,18 +1027,102 @@ onMounted(() => {
   }
 }
 
+/* 输入区域样式 */
 .input-area {
-  display: flex;
-  gap: 12px;
-  padding: 20px;
-  border-top: 1px solid #eee;
   max-width: 800px;
-  margin: 0 auto;
+  margin: 0 auto 20px;
   width: 100%;
+  padding: 0 20px;
+}
+
+.input-container {
+  display: flex;
+  flex-direction: column;
+  background: #FFFFFF;
+  border-radius: 16px;
+  box-shadow: 0 2px 12px rgba(124, 58, 237, 0.08);
+  border: 1px solid #EDE9FE;
+  overflow: hidden;
 }
 
 .input-area .el-textarea {
   flex: 1;
+}
+
+/* 输入框样式 */
+.input-area :deep(.el-textarea__inner) {
+  border: none;
+  background: transparent;
+  padding: 16px 20px;
+  font-size: 14px;
+  line-height: 1.6;
+  resize: none;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.input-area :deep(.el-textarea__inner:focus) {
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+}
+
+.input-area :deep(.el-textarea__inner::placeholder) {
+  color: #A78BFA;
+}
+
+/* 输入框底部操作栏 */
+.input-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: transparent;
+}
+
+.actions-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.actions-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 操作按钮通用样式 */
+.input-actions .action-btn {
+  background: transparent;
+  border: none;
+  color: #7C3AED;
+  transition: all 0.2s ease;
+}
+
+.input-actions .action-btn:hover {
+  background: #F5F3FF;
+  color: #6D28D9;
+}
+
+/* 发送按钮样式 */
+.input-actions .send-btn {
+  background: #7C3AED;
+  border-color: #7C3AED;
+  color: white;
+  transition: all 0.2s ease;
+}
+
+.input-actions .send-btn:hover {
+  background: #6D28D9;
+  transform: scale(1.05);
+}
+
+.input-actions .send-btn:disabled {
+  background: #EDE9FE;
+  border-color: #EDE9FE;
+  color: #A78BFA;
+  transform: none;
 }
 
 /* Agent 元数据样式 */

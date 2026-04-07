@@ -103,7 +103,7 @@ class SessionManager:
         thread_id = f"{demo_id}:{session_id}"
         return {
             "configurable": {"thread_id": thread_id},
-            "recursion_limit": 15  # 限制工具调用循环次数，防止无限循环
+            "recursion_limit": 15  # 限制工具调用循环次数，防止无限循环和重复调用
         }
 
     async def clear_session(self, session_id: str, demo_id: str):

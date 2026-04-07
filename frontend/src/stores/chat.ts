@@ -143,47 +143,36 @@ export const useChatStore = defineStore('chat', () => {
     let currentAssistantMsg: Message | null = null
     let currentContent = ''
     let streamedMetadata: AgentMetadata | undefined
-    let buffer = ''
     let assistantMsgCount = 0
+
+    // 辅助函数：确保有当前助手消息
+    const ensureAssistantMsg = () => {
+      if (!currentAssistantMsg) {
+        assistantMsgCount++
+        currentAssistantMsg = {
+          id: `assistant-${Date.now()}-${assistantMsgCount}`,
+          role: 'assistant',
+          content: '',
+          timestamp: Date.now(),
+        }
+        currentMessages.push(currentAssistantMsg)
+      }
+    }
 
     try {
       await sendMessageStream(
         userMessage,
         (chunk) => {
-          buffer += chunk
+          // 按行分割处理
+          const lines = chunk.split('\n')
 
-          // 处理 __EVENT__ 标记
-          let eventIdx: number
-          while ((eventIdx = buffer.indexOf('\n__EVENT__:')) !== -1) {
-            // 提取事件前的普通内容
-            const beforeEvent = buffer.substring(0, eventIdx)
-            buffer = buffer.substring(eventIdx + 1) // 保留 __EVENT__:
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines[i]
 
-            // 添加普通内容到当前助手消息
-            if (beforeEvent) {
-              currentContent += beforeEvent
-              if (!currentAssistantMsg) {
-                assistantMsgCount++
-                currentAssistantMsg = {
-                  id: `assistant-${Date.now()}-${assistantMsgCount}`,
-                  role: 'assistant',
-                  content: currentContent,
-                  timestamp: Date.now(),
-                }
-                currentMessages.push(currentAssistantMsg)
-              } else {
-                currentAssistantMsg.content = currentContent
-              }
-            }
-
-            // 解析事件
-            const eventEndIdx = buffer.indexOf('\n', 10) // 跳过 "__EVENT__:"
-            if (eventEndIdx !== -1) {
-              const eventLine = buffer.substring(0, eventEndIdx)
-              buffer = buffer.substring(eventEndIdx + 1)
-
+            // 检查是否是事件行
+            if (line.startsWith('__EVENT__:')) {
               try {
-                const eventData = JSON.parse(eventLine.substring('__EVENT__:'.length))
+                const eventData = JSON.parse(line.substring('__EVENT__:'.length))
                 if (eventData.type === 'tool_call') {
                   // 工具调用时，结束当前助手消息
                   if (currentAssistantMsg) {
@@ -207,42 +196,13 @@ export const useChatStore = defineStore('chat', () => {
                   console.log(`[ChatStore] 收到工具事件: ${eventData.tool_name}`)
                 }
               } catch (e) {
-                console.error('Failed to parse event:', e, eventLine)
+                console.error('Failed to parse event:', e, line)
               }
             }
-          }
-
-          // 处理 __METADATA__ 标记
-          let metaIdx: number
-          while ((metaIdx = buffer.indexOf('\n__METADATA__:')) !== -1) {
-            const beforeMeta = buffer.substring(0, metaIdx)
-            buffer = buffer.substring(metaIdx + 1)
-
-            // 添加普通内容
-            if (beforeMeta) {
-              currentContent += beforeMeta
-              if (!currentAssistantMsg) {
-                assistantMsgCount++
-                currentAssistantMsg = {
-                  id: `assistant-${Date.now()}-${assistantMsgCount}`,
-                  role: 'assistant',
-                  content: currentContent,
-                  timestamp: Date.now(),
-                }
-                currentMessages.push(currentAssistantMsg)
-              } else {
-                currentAssistantMsg.content = currentContent
-              }
-            }
-
-            // 解析元数据
-            const metaEndIdx = buffer.indexOf('\n', 13)
-            if (metaEndIdx !== -1) {
-              const metaLine = buffer.substring(0, metaEndIdx)
-              buffer = buffer.substring(metaEndIdx + 1)
-
+            // 检查是否是元数据行
+            else if (line.startsWith('__METADATA__:')) {
               try {
-                streamedMetadata = JSON.parse(metaLine.substring('__METADATA__:'.length))
+                streamedMetadata = JSON.parse(line.substring('__METADATA__:'.length))
                 if (currentAssistantMsg) {
                   currentAssistantMsg.agentMetadata = streamedMetadata
                 }
@@ -250,23 +210,11 @@ export const useChatStore = defineStore('chat', () => {
                 console.error('Failed to parse metadata:', e)
               }
             }
-          }
-
-          // 剩余的 buffer 作为普通内容（实时显示）
-          if (buffer && !buffer.includes('__EVENT__:') && !buffer.includes('__METADATA__:')) {
-            currentContent += buffer
-            buffer = ''
-            if (!currentAssistantMsg) {
-              assistantMsgCount++
-              currentAssistantMsg = {
-                id: `assistant-${Date.now()}-${assistantMsgCount}`,
-                role: 'assistant',
-                content: currentContent,
-                timestamp: Date.now(),
-              }
-              currentMessages.push(currentAssistantMsg)
-            } else {
-              currentAssistantMsg.content = currentContent
+            // 普通内容行
+            else if (line) {
+              currentContent += (currentContent ? '\n' : '') + line
+              ensureAssistantMsg()
+              currentAssistantMsg!.content = currentContent
             }
           }
         },

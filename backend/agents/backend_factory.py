@@ -26,7 +26,7 @@ def make_backend(runtime):
     def get_memories_namespace(ctx: BackendContext) -> tuple[str, ...]:
         """获取 /memories/ 路径的命名空间"""
         # 使用固定的命名空间存储长期记忆
-        return ("memories",)
+        return "memories",
 
     logger.info("🔧 [BackendFactory] 创建 CompositeBackend")
     logger.info(f"  - 默认: StateBackend (临时存储)")
