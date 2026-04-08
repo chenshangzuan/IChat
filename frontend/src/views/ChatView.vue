@@ -217,6 +217,37 @@
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
+              <el-popover
+                :visible="showUserIdPopover"
+                placement="top"
+                :width="240"
+                trigger="click"
+              >
+                <template #reference>
+                  <el-button
+                    circle
+                    :icon="User"
+                    class="action-btn"
+                    :class="{ 'user-id-active': chatStore.userId }"
+                    :title="chatStore.userId ? `当前用户: ${chatStore.userId}` : '设置用户 ID'"
+                    @click="showUserIdPopover = !showUserIdPopover"
+                  />
+                </template>
+                <div class="user-id-popover">
+                  <div style="margin-bottom: 8px; font-size: 13px; color: #666;">设置用户 ID</div>
+                  <el-input
+                    v-model="userIdInput"
+                    placeholder="输入用户 ID"
+                    size="small"
+                    clearable
+                    @keydown.enter="confirmUserId"
+                  />
+                  <div style="margin-top: 8px; text-align: right;">
+                    <el-button size="small" @click="showUserIdPopover = false">取消</el-button>
+                    <el-button size="small" type="primary" @click="confirmUserId">确认</el-button>
+                  </div>
+                </div>
+              </el-popover>
             </div>
             <div class="actions-right">
               <el-button
@@ -263,6 +294,15 @@ const chatStore = useChatStore()
 const inputMessage = ref('')
 const messagesContainer = ref<HTMLElement>()
 
+// User ID 弹出框状态
+const showUserIdPopover = ref(false)
+const userIdInput = ref(chatStore.userId)
+
+function confirmUserId() {
+  chatStore.setUserId(userIdInput.value.trim())
+  showUserIdPopover.value = false
+}
+
 // 历史聊天列表状态
 const showHistory = ref(true)
 const historyExpanded = ref(false)
@@ -280,6 +320,7 @@ const presetQuestionsMap: Record<string, string[]> = {
     '帮我把这个接口描述规范化：query ai gateway list',
     '帮我把这个接口操作符规范化：zec:elasticIp:listNetworkTypes',
     '帮我写一首关于元旦节的诗，然后存到/memories/ 目录下',
+    '查看/memories/ 目录下有哪些文件',
   ],
   'basic-chat': [
     '什么是 LangChain？',
@@ -1103,6 +1144,11 @@ onMounted(() => {
 .input-actions .action-btn:hover {
   background: #F5F3FF;
   color: #6D28D9;
+}
+
+.input-actions .action-btn.user-id-active {
+  color: #fff;
+  background: #7C3AED;
 }
 
 /* 发送按钮样式 */

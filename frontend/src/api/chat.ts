@@ -53,12 +53,14 @@ export async function getDemos() {
 export async function sendMessage(
   message: string,
   sessionId = 'default',
-  demoId = 'basic-chat'
+  demoId = 'basic-chat',
+  userId = ''
 ): Promise<ChatResponseData> {
   const response = await api.post('/chat', {
     message,
     session_id: sessionId,
     demo_id: demoId,
+    user_id: userId,
   })
   return response.data
 }
@@ -70,7 +72,8 @@ export async function sendMessageStream(
   message: string,
   onChunk: (chunk: string) => void,
   sessionId = 'default',
-  demoId = 'basic-chat'
+  demoId = 'basic-chat',
+  userId = ''
 ) {
   const response = await fetch('/api/chat/stream', {
     method: 'POST',
@@ -81,6 +84,7 @@ export async function sendMessageStream(
       message,
       session_id: sessionId,
       demo_id: demoId,
+      user_id: userId,
     }),
   })
 

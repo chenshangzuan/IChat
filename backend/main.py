@@ -30,6 +30,7 @@ class ChatRequest(BaseModel):
     message: str
     session_id: str = "default"
     demo_id: str = "deepagents"  # 新增：指定使用的 demo
+    user_id: str = ""  # 用户 ID，用于记忆命名空间隔离
 
 
 class AgentMetadata(BaseModel):
@@ -177,7 +178,8 @@ async def chat(request: ChatRequest):
             # DeepAgents Demo（包含 agent 元数据）
             result = await deepagents_demo.chat_response_with_metadata(
                 user_input=request.message,
-                session_id=request.session_id
+                session_id=request.session_id,
+                user_id=request.user_id
             )
 
             # 提取 tracker_summary 并转换为 agent_metadata
@@ -247,7 +249,8 @@ async def chat_stream_endpoint(request: ChatRequest):
                 # DeepAgents Demo（流式 + 元数据）
                 async for chunk in deepagents_demo.chat_stream_with_metadata(
                     user_input=request.message,
-                    session_id=request.session_id
+                    session_id=request.session_id,
+                    user_id=request.user_id
                 ):
                     yield chunk
 

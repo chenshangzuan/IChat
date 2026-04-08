@@ -4,10 +4,18 @@ Deep Agents Multi-Agent 系统配置
 使用 LangChain Deep Agents 的 create_deep_agent 创建 multi-agent 系统。
 每个子代理通过 skills 参数指向技能目录。
 """
+from dataclasses import dataclass
+
 from deepagents import create_deep_agent
 from models import default_llm
 import logging
 import sys
+
+
+@dataclass
+class AgentContext:
+    """Agent 运行时上下文，通过 LangGraph context 机制注入"""
+    user_id: str = ""
 
 # 配置日志 - 确保在终端中可见
 logging.basicConfig(
@@ -149,6 +157,14 @@ def create_orchestrator(checkpointer=None, store=None):
 - 读取长期文件时：**必须**使用完整路径 `/memories/xxx.txt`，不要省略前缀
 - 如果不确定文件路径，先用 glob 工具搜索
 
+## 文件读取重试规则（重要！）
+
+**read_file 最多尝试 2 次：**
+- 第 1 次返回 "not found" → 可以换一个路径再试 1 次
+- 第 2 次仍然 "not found" → **立即停止**，直接告诉用户文件不存在
+- **严禁**对同一个文件路径重复调用 read_file
+- **严禁**超过 2 次 read_file 尝试后继续搜索
+
 ## 生成并保存内容的标准流程
 
 **步骤：**
@@ -190,6 +206,7 @@ def create_orchestrator(checkpointer=None, store=None):
         checkpointer=checkpointer,      # 会话记忆支持
         store=store,                    # 长期记忆支持
         backend=make_backend,           # 混合存储后端
+        context_schema=AgentContext,    # 运行时上下文（user_id 等）
     )
 
     # 打印 agent 的图信息

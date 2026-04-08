@@ -24,17 +24,20 @@ def make_backend(runtime):
     from deepagents.backends.store import BackendContext
 
     def get_memories_namespace(ctx: BackendContext) -> tuple[str, ...]:
-        """获取 /memories/ 路径的命名空间"""
-        # 使用固定的命名空间存储长期记忆
-        return "memories",
+        """获取 /memories/ 路径的命名空间，按 user_id 隔离"""
+        user_id = getattr(ctx.runtime.context, "user_id", "") if ctx.runtime.context else ""
+        # 必须始终使用二级 namespace，避免 LIKE 'memories%' 前缀匹配到
+        # memories-shared 或其他用户的 memories.xxx
+        return ("memories", user_id or "default")
 
-    logger.info("🔧 [BackendFactory] 创建 CompositeBackend")
-    logger.info(f"  - 默认: StateBackend (临时存储)")
-    logger.info(f"  - /memories/: StoreBackend (持久化存储)")
+    logger.debug("🔧 [BackendFactory] 创建 CompositeBackend")
+    logger.debug(f"  - 默认: StateBackend (临时存储)")
+    logger.debug(f"  - /memories/: StoreBackend (持久化存储)")
 
     return CompositeBackend(
         default=StateBackend(runtime),
         routes={
-            "/memories/": StoreBackend(runtime, namespace=get_memories_namespace)
+            "/memories/": StoreBackend(runtime, namespace=get_memories_namespace),
+            "/memories/shared/": StoreBackend(runtime, namespace=lambda ctx: ("memories-shared",))
         }
     )

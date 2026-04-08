@@ -193,7 +193,7 @@ async def chat_response(user_input: str, session_id: str = "default") -> str:
     return response
 
 
-async def chat_response_with_metadata(user_input: str, session_id: str = "default") -> Dict[str, Any]:
+async def chat_response_with_metadata(user_input: str, session_id: str = "default", user_id: str = "") -> Dict[str, Any]:
     """
     非流式聊天响应（包含元数据）
 
@@ -221,9 +221,11 @@ async def chat_response_with_metadata(user_input: str, session_id: str = "defaul
     # 获取会话配置（包含 thread_id）
     config = await session_manager.get_config(session_id, "deepagents")
 
+    from agents.deepagents import AgentContext
     result = await orchestrator.ainvoke(
         {"messages": [{"role": "user", "content": user_input}]},
-        config=config
+        config=config,
+        context=AgentContext(user_id=user_id),
     )
 
     # 使用跟踪器分析消息历史
@@ -288,7 +290,7 @@ async def chat_stream(user_input: str, session_id: str = "default") -> AsyncIter
             yield chunk.content
 
 
-async def chat_stream_with_metadata(user_input: str, session_id: str = "default") -> AsyncIterator[str]:
+async def chat_stream_with_metadata(user_input: str, session_id: str = "default", user_id: str = "") -> AsyncIterator[str]:
     """
     流式聊天响应（包含元数据）
 
@@ -325,10 +327,12 @@ async def chat_stream_with_metadata(user_input: str, session_id: str = "default"
     # 获取会话配置（包含 thread_id）
     config = await session_manager.get_config(session_id, "deepagents")
 
+    from agents.deepagents import AgentContext
     # 流式输出响应
     async for chunk in orchestrator.astream(
         {"messages": [{"role": "user", "content": user_input}]},
         config=config,
+        context=AgentContext(user_id=user_id),
         stream_mode="messages"
     ):
         # deepagents 的 astream 返回 tuple: (AIMessage, metadata)

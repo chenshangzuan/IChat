@@ -47,6 +47,19 @@ export const useChatStore = defineStore('chat', () => {
 
   const sessionId = ref(initialSessionId)
 
+  // userId 状态（从 localStorage 读取，默认为空）
+  const userId = ref(localStorage.getItem('ichat_user_id') || '')
+
+  function setUserId(id: string) {
+    userId.value = id
+    if (id) {
+      localStorage.setItem('ichat_user_id', id)
+    } else {
+      localStorage.removeItem('ichat_user_id')
+    }
+    console.log('[ChatStore] 设置 userId:', id || '(空)')
+  }
+
   // 状态
   const currentDemo = ref<string>('deepagents')
   const demos = ref<Demo[]>([])
@@ -219,7 +232,8 @@ export const useChatStore = defineStore('chat', () => {
           }
         },
         sessionId.value,
-        currentDemo.value
+        currentDemo.value,
+        userId.value
       )
 
       // 流式结束后，确保最后的内容已更新
@@ -289,6 +303,8 @@ export const useChatStore = defineStore('chat', () => {
     isLoading,
     hasMessages,
     sessionId,
+    userId,
+    setUserId,
     demoMessages,  // 暴露给外部访问
     loadDemos,
     loadHistory,
