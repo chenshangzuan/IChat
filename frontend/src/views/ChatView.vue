@@ -109,6 +109,64 @@
               </div>
             </template>
 
+            <!-- 审批消息渲染 -->
+            <template v-else-if="message.role === 'approval'">
+              <div class="message-avatar approval-avatar">
+                <el-icon :size="20">
+                  <Edit />
+                </el-icon>
+              </div>
+              <div class="message-content">
+                <div class="approval-card">
+                  <div class="approval-header">
+                    <span class="approval-icon">&#9888;&#65039;</span>
+                    <span class="approval-title">文件写入审批</span>
+                    <el-tag
+                      size="small"
+                      :type="message.approvalInfo?.status === 'pending' ? 'warning' : message.approvalInfo?.status === 'approved' ? 'success' : 'danger'"
+                    >
+                      {{ message.approvalInfo?.status === 'pending' ? '待审批' : message.approvalInfo?.status === 'approved' ? '已批准' : '已拒绝' }}
+                    </el-tag>
+                  </div>
+                  <div class="approval-actions-list">
+                    <div
+                      v-for="(action, idx) in message.approvalInfo?.actions"
+                      :key="idx"
+                      class="approval-action-item"
+                    >
+                      <div class="approval-action-name">{{ action.name }}</div>
+                      <div class="approval-action-args">
+                        <div v-if="action.args?.file_path" class="approval-file-path">
+                          {{ action.args.file_path }}
+                        </div>
+                        <div v-if="action.args?.content" class="approval-content-preview">
+                          <pre>{{ (action.args.content || '').substring(0, 500) }}{{ (action.args.content || '').length > 500 ? '...' : '' }}</pre>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-if="message.approvalInfo?.status === 'pending'" class="approval-buttons">
+                    <el-button
+                      type="success"
+                      size="small"
+                      @click="handleApproval(message.id, 'approve')"
+                      :loading="chatStore.isLoading"
+                    >
+                      批准
+                    </el-button>
+                    <el-button
+                      type="danger"
+                      size="small"
+                      @click="handleApproval(message.id, 'reject')"
+                      :loading="chatStore.isLoading"
+                    >
+                      拒绝
+                    </el-button>
+                  </div>
+                </div>
+              </div>
+            </template>
+
             <!-- 用户/助手消息渲染 -->
             <template v-else>
               <div class="message-avatar">
@@ -301,6 +359,12 @@ const userIdInput = ref(chatStore.userId)
 function confirmUserId() {
   chatStore.setUserId(userIdInput.value.trim())
   showUserIdPopover.value = false
+}
+
+// 审批处理
+async function handleApproval(msgId: string, decision: 'approve' | 'reject') {
+  await chatStore.submitApproval(msgId, decision)
+  scrollToBottom()
 }
 
 // 历史聊天列表状态
@@ -1264,6 +1328,95 @@ onMounted(() => {
   line-height: 1.6;
   max-height: 400px;
   overflow-y: auto;
+}
+
+.message.approval {
+  margin-bottom: 16px;
+}
+
+.message.approval .message-content {
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+/* 审批消息样式 */
+.approval-avatar {
+  background: #FEF3C7 !important;
+  color: #D97706 !important;
+}
+
+.approval-card {
+  border: 1px solid #FDE68A;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #FFFBEB;
+}
+
+.approval-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: #FEF3C7;
+}
+
+.approval-icon {
+  font-size: 16px;
+}
+
+.approval-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: #92400E;
+  flex: 1;
+}
+
+.approval-actions-list {
+  padding: 12px 16px;
+}
+
+.approval-action-item {
+  margin-bottom: 8px;
+}
+
+.approval-action-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: #78350F;
+  margin-bottom: 4px;
+}
+
+.approval-file-path {
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 12px;
+  color: #B45309;
+  background: #FEF3C7;
+  padding: 4px 8px;
+  border-radius: 4px;
+  margin-bottom: 4px;
+}
+
+.approval-content-preview pre {
+  margin: 4px 0 0;
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 12px;
+  color: #475569;
+  background: #F8FAFC;
+  padding: 8px;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid #E2E8F0;
+}
+
+.approval-buttons {
+  padding: 8px 16px 12px;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .stat-item {

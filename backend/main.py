@@ -33,6 +33,20 @@ class ChatRequest(BaseModel):
     user_id: str = ""  # 用户 ID，用于记忆命名空间隔离
 
 
+class ApprovalDecision(BaseModel):
+    """审批决策"""
+    type: str  # "approve" | "reject"
+    message: str = ""  # reject 时的原因
+
+
+class ApprovalRequest(BaseModel):
+    """审批请求模型"""
+    session_id: str
+    demo_id: str = "deepagents"
+    user_id: str = ""
+    decisions: list[ApprovalDecision]
+
+
 class AgentMetadata(BaseModel):
     """Agent 元数据模型"""
     agent_type: str | None = None  # agent 类型：orchestrator, coder, sre
@@ -252,6 +266,8 @@ async def chat_stream_endpoint(request: ChatRequest):
                     session_id=request.session_id,
                     user_id=request.user_id
                 ):
+                    if '__EVENT__' in chunk:
+                        logger.info(f"  ➡️ [main] yield EVENT chunk: {chunk[:150]}...")
                     yield chunk
 
             else:
@@ -263,6 +279,44 @@ async def chat_stream_endpoint(request: ChatRequest):
 
         except Exception as e:
             logger.error(f"❌ 流式聊天处理失败: {e}")
+            yield f"\n[错误: {str(e)}]"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/plain",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
+    )
+
+
+@app.post("/api/chat/approve", tags=["聊天"])
+async def chat_approve_endpoint(request: ApprovalRequest):
+    """
+    审批恢复接口
+
+    用户审批 write_file 操作后，调用此接口恢复 agent 执行。
+    返回格式与 /api/chat/stream 一致。
+    """
+    async def generate():
+        try:
+            logger.info(f"📨 收到审批请求: session={request.session_id}, decisions={[d.type for d in request.decisions]}")
+
+            decisions = [{"type": d.type, "message": d.message} for d in request.decisions]
+            async for chunk in deepagents_demo.chat_approve_stream(
+                session_id=request.session_id,
+                user_id=request.user_id,
+                decisions=decisions,
+            ):
+                yield chunk
+
+            logger.info(f"✅ 审批恢复响应完成: session={request.session_id}")
+
+        except Exception as e:
+            import traceback
+            logger.error(f"❌ 审批恢复处理失败: {type(e).__name__}: {e}")
+            logger.error(traceback.format_exc())
             yield f"\n[错误: {str(e)}]"
 
     return StreamingResponse(
@@ -450,6 +504,37 @@ async def get_chat_history(
                                     "status": "completed"
                                 }
                             })
+
+            # 检查是否有待审批的 interrupt（刷新后恢复审批卡片）
+            from agents import get_orchestrator_with_store
+            orchestrator = await get_orchestrator_with_store()
+            state = await orchestrator.aget_state(config)
+            if state.next and state.interrupts:
+                from datetime import datetime, timezone
+                for intr in state.interrupts:
+                    value = intr.value if hasattr(intr, 'value') else intr
+                    if isinstance(value, dict):
+                        actions = [
+                            {
+                                "name": ar.get("name", ""),
+                                "args": ar.get("args", {}),
+                                "description": ar.get("description", ""),
+                            }
+                            for ar in value.get("action_requests", [])
+                        ]
+                        if actions:
+                            history.append({
+                                "id": f"approval-{len(history)}",
+                                "role": "approval",
+                                "content": "",
+                                "timestamp": 0,
+                                "approvalInfo": {
+                                    "actions": actions,
+                                    "status": "pending",
+                                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                                }
+                            })
+                logger.info(f"📋 恢复待审批消息: {len(state.interrupts)} 个")
 
             logger.info(f"✅ 获取历史成功: {len(history)} 条消息")
             return history

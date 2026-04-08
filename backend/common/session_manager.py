@@ -2,13 +2,12 @@
 会话管理器 - 统一管理所有会话状态
 
 使用 LangGraph 的 Checkpointer 机制实现会话记忆：
-- 默认使用 AsyncJsonSqliteSaver（SQLite 持久化存储，支持异步，明文 JSON）
+- 默认使用 AsyncSqliteSaver（LangGraph 标准 SQLite 持久化存储）
 """
 from typing import Optional
 from langgraph.checkpoint.memory import MemorySaver
 import pathlib
 import logging
-import aiosqlite
 
 logger = logging.getLogger(__name__)
 
@@ -64,12 +63,12 @@ class SessionManager:
         if backend == "memory":
             return MemorySaver()
         elif backend == "sqlite":
-            from common.checkpoint.json_sqlite_saver import AsyncJsonSqliteSaver
+            import aiosqlite
+            from common.checkpoint.json_sqlite_saver import DebugAsyncSqliteSaver
             db_path = pathlib.Path("data/deepagent_demo.db")
             db_path.parent.mkdir(parents=True, exist_ok=True)
-            # 异步创建 SQLite 连接并传入 AsyncJsonSqliteSaver（明文 JSON 存储）
             conn = await aiosqlite.connect(str(db_path))
-            return AsyncJsonSqliteSaver(conn)
+            return DebugAsyncSqliteSaver(conn)
         else:
             raise ValueError(f"Unknown backend: {backend}")
 

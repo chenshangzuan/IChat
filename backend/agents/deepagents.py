@@ -165,27 +165,22 @@ def create_orchestrator(checkpointer=None, store=None):
 - **严禁**对同一个文件路径重复调用 read_file
 - **严禁**超过 2 次 read_file 尝试后继续搜索
 
-## 生成并保存内容的标准流程
+## 文件写入规则（极其重要！）
+
+**write_file 调用原则：每个文件只调用一次 write_file，成功后绝不重复调用！**
 
 **步骤：**
 1. **生成内容** - 先在脑中生成完整内容
-2. **选择文件名** - 按以下优先级：
-   - **用户指定了文件名** → 优先使用用户指定的文件名
-   - **用户未指定文件名** → 使用默认名称（如 `/memories/劳动节诗.txt`）
-3. **直接保存** - 调用 write_file
-4. **处理重复** - 如果返回 "already exists"，追加时间戳后缀重试一次
-5. **回复用户** - 展示已保存的文件路径和内容
+2. **选择文件名** - 用户指定则用用户的，否则用默认名称
+3. **调用 write_file** - 只调用**一次**
+4. **成功后立即回复用户** - 不要再调用 write_file
+5. **仅当返回 "already exists" 时** → 追加时间戳后缀重试**一次**，然后回复
 
-**文件名规则：**
-- 用户指定：`/memories/我的诗.txt` → 先尝试 `/memories/我的诗.txt`
-- 重复时：`/memories/我的诗_20260407_143052.txt`
-
-**示例1（用户指定文件名）**：
-用户："写一首关于劳动节的诗，保存到 /memories/劳动节诗.txt"
-1. 调用：write_file("/memories/劳动节诗.txt", "五月春风暖神州...")
-2. 如果成功 → 回复："✅ 已保存到 /memories/劳动节诗.txt"
-3. 如果 "already exists" → 调用 write_file("/memories/劳动节诗_20260407_143052.txt", ...)
-4. 回复："✅ 已保存到 /memories/劳动节诗_20260407_143052.txt（原文件名已存在）"
+**严禁：**
+- **严禁** write_file 成功后对同一文件再次调用 write_file
+- **严禁** 对同一内容多次写入不同文件
+- **严禁** write_file 成功后做任何"确认写入"或"再写一次"的操作
+- write_file 返回成功 → 文件已保存，直接告诉用户结果即可
 
 记住：你是协调者，不是执行者。正确委托是你的价值所在！
 """
@@ -207,6 +202,7 @@ def create_orchestrator(checkpointer=None, store=None):
         store=store,                    # 长期记忆支持
         backend=make_backend,           # 混合存储后端
         context_schema=AgentContext,    # 运行时上下文（user_id 等）
+        interrupt_on={"write_file": True},  # write_file 需要用户审批
     )
 
     # 打印 agent 的图信息

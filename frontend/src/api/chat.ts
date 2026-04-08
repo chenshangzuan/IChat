@@ -109,6 +109,49 @@ export async function sendMessageStream(
 }
 
 /**
+ * 发送审批决策（流式）
+ */
+export async function sendApprovalStream(
+  decisions: Array<{ type: string; message?: string }>,
+  onChunk: (chunk: string) => void,
+  sessionId = 'default',
+  demoId = 'deepagents',
+  userId = ''
+) {
+  const response = await fetch('/api/chat/approve', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      session_id: sessionId,
+      demo_id: demoId,
+      user_id: userId,
+      decisions,
+    }),
+  })
+
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`)
+  }
+
+  const reader = response.body?.getReader()
+  const decoder = new TextDecoder()
+
+  if (!reader) {
+    throw new Error('No response body')
+  }
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+
+    const chunk = decoder.decode(value, { stream: true })
+    onChunk(chunk)
+  }
+}
+
+/**
  * 清空对话历史
  */
 export async function clearHistory(

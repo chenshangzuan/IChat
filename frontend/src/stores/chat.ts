@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import {
   sendMessage,
   sendMessageStream,
+  sendApprovalStream,
   clearHistory as clearHistoryApi,
   getDemos,
   getHistory,
@@ -10,15 +11,26 @@ import {
   type ToolCallDetail
 } from '@/api/chat'
 
+export interface ApprovalAction {
+  name: string
+  args: Record<string, any>
+  description: string
+}
+
 export interface Message {
   id: string
-  role: 'user' | 'assistant' | 'tool'  // 新增 tool 角色
+  role: 'user' | 'assistant' | 'tool' | 'approval'
   content: string
   timestamp: number
   agentMetadata?: AgentMetadata  // agent 元数据（仅 deepagents demo）
   toolInfo?: {               // 工具信息（仅 tool 角色）
     toolName: string
     status: string
+  }
+  approvalInfo?: {           // 审批信息（仅 approval 角色）
+    actions: ApprovalAction[]
+    timestamp: string
+    status: 'pending' | 'approved' | 'rejected'
   }
 }
 
@@ -108,7 +120,7 @@ export const useChatStore = defineStore('chat', () => {
       const history = await getHistory(sessionId.value, currentDemo.value)
 
       // 转换为 Message 格式，保留所有字段
-      const messages: Message[] = history.map((msg, index) => ({
+      const messages: Message[] = history.map((msg: any, index: number) => ({
         id: msg.id || `history-${index}`,
         role: msg.role,
         content: msg.content,
@@ -116,7 +128,9 @@ export const useChatStore = defineStore('chat', () => {
         // 保留工具信息
         toolInfo: msg.toolInfo,
         // 保留 agent 元数据
-        agentMetadata: msg.agentMetadata
+        agentMetadata: msg.agentMetadata,
+        // 保留审批信息
+        approvalInfo: msg.approvalInfo
       }))
 
       // 恢复到当前 demo 的消息历史
@@ -176,6 +190,9 @@ export const useChatStore = defineStore('chat', () => {
       await sendMessageStream(
         userMessage,
         (chunk) => {
+          // 调试：打印每个 chunk
+          console.log('[ChatStore] chunk:', JSON.stringify(chunk).substring(0, 300))
+
           // 按行分割处理
           const lines = chunk.split('\n')
 
@@ -184,6 +201,7 @@ export const useChatStore = defineStore('chat', () => {
 
             // 检查是否是事件行
             if (line.startsWith('__EVENT__:')) {
+              console.log('[ChatStore] 解析事件行:', line.substring(0, 200))
               try {
                 const eventData = JSON.parse(line.substring('__EVENT__:'.length))
                 if (eventData.type === 'tool_call') {
@@ -207,6 +225,31 @@ export const useChatStore = defineStore('chat', () => {
                   }
                   currentMessages.push(toolMsg)
                   console.log(`[ChatStore] 收到工具事件: ${eventData.tool_name}`)
+                }
+                else if (eventData.type === 'approval_request') {
+                  // 审批请求，结束当前助手消息
+                  if (currentAssistantMsg) {
+                    currentAssistantMsg.content = currentContent.trim()
+                    currentAssistantMsg = null
+                    currentContent = ''
+                  }
+
+                  // 创建审批消息
+                  const approvalMsg: Message = {
+                    id: `approval-${Date.now()}`,
+                    role: 'approval',
+                    content: eventData.actions.map((a: any) =>
+                      `${a.name}: ${JSON.stringify(a.args)}`
+                    ).join('\n'),
+                    timestamp: Date.now(),
+                    approvalInfo: {
+                      actions: eventData.actions,
+                      timestamp: eventData.timestamp,
+                      status: 'pending',
+                    }
+                  }
+                  currentMessages.push(approvalMsg)
+                  console.log(`[ChatStore] 收到审批事件: ${eventData.actions.map((a: any) => a.name)}`)
                 }
               } catch (e) {
                 console.error('Failed to parse event:', e, line)
@@ -285,6 +328,132 @@ export const useChatStore = defineStore('chat', () => {
     return true
   }
 
+  async function submitApproval(approvalMsgId: string, decision: 'approve' | 'reject', rejectMessage = '') {
+    const currentMessages = demoMessages.value.get(currentDemo.value)
+    if (!currentMessages) return
+
+    // 找到审批消息并更新状态
+    const approvalMsg = currentMessages.find(m => m.id === approvalMsgId)
+    if (!approvalMsg || !approvalMsg.approvalInfo) return
+
+    approvalMsg.approvalInfo.status = decision === 'approve' ? 'approved' : 'rejected'
+
+    isLoading.value = true
+
+    // 流式处理状态
+    let currentAssistantMsg: Message | null = null
+    let currentContent = ''
+    let streamedMetadata: AgentMetadata | undefined
+    let assistantMsgCount = 0
+
+    const ensureAssistantMsg = () => {
+      if (!currentAssistantMsg) {
+        assistantMsgCount++
+        currentAssistantMsg = {
+          id: `assistant-${Date.now()}-${assistantMsgCount}`,
+          role: 'assistant',
+          content: '',
+          timestamp: Date.now(),
+        }
+        currentMessages.push(currentAssistantMsg)
+      }
+    }
+
+    const decisions = approvalMsg.approvalInfo.actions.map(() => ({
+      type: decision,
+      message: decision === 'reject' ? (rejectMessage || '用户拒绝了此操作') : '',
+    }))
+
+    try {
+      await sendApprovalStream(
+        decisions,
+        (chunk) => {
+          const lines = chunk.split('\n')
+          for (const line of lines) {
+            if (line.startsWith('__EVENT__:')) {
+              try {
+                const eventData = JSON.parse(line.substring('__EVENT__:'.length))
+                if (eventData.type === 'tool_call') {
+                  if (currentAssistantMsg) {
+                    currentAssistantMsg.content = currentContent.trim()
+                    currentAssistantMsg = null
+                    currentContent = ''
+                  }
+                  const toolMsg: Message = {
+                    id: `tool-${Date.now()}-${assistantMsgCount}`,
+                    role: 'tool',
+                    content: eventData.output,
+                    timestamp: Date.now(),
+                    toolInfo: { toolName: eventData.tool_name, status: eventData.status }
+                  }
+                  currentMessages.push(toolMsg)
+                }
+                else if (eventData.type === 'approval_request') {
+                  if (currentAssistantMsg) {
+                    currentAssistantMsg.content = currentContent.trim()
+                    currentAssistantMsg = null
+                    currentContent = ''
+                  }
+                  const newApprovalMsg: Message = {
+                    id: `approval-${Date.now()}`,
+                    role: 'approval',
+                    content: eventData.actions.map((a: any) =>
+                      `${a.name}: ${JSON.stringify(a.args)}`
+                    ).join('\n'),
+                    timestamp: Date.now(),
+                    approvalInfo: {
+                      actions: eventData.actions,
+                      timestamp: eventData.timestamp,
+                      status: 'pending',
+                    }
+                  }
+                  currentMessages.push(newApprovalMsg)
+                }
+              } catch (e) {
+                console.error('Failed to parse event:', e)
+              }
+            }
+            else if (line.startsWith('__METADATA__:')) {
+              try {
+                streamedMetadata = JSON.parse(line.substring('__METADATA__:'.length))
+                if (currentAssistantMsg) {
+                  currentAssistantMsg.agentMetadata = streamedMetadata
+                }
+              } catch (e) {
+                console.error('Failed to parse metadata:', e)
+              }
+            }
+            else if (line) {
+              currentContent += (currentContent ? '\n' : '') + line
+              ensureAssistantMsg()
+              currentAssistantMsg!.content = currentContent
+            }
+          }
+        },
+        sessionId.value,
+        currentDemo.value,
+        userId.value
+      )
+
+      if (currentAssistantMsg) {
+        currentAssistantMsg.content = currentContent.trim()
+        if (streamedMetadata) {
+          currentAssistantMsg.agentMetadata = streamedMetadata
+        }
+      }
+    } catch (error) {
+      const errorMsg = `错误: ${error instanceof Error ? error.message : '未知错误'}`
+      currentMessages.push({
+        id: `assistant-${Date.now()}-error`,
+        role: 'assistant',
+        content: errorMsg,
+        timestamp: Date.now(),
+      })
+    } finally {
+      isLoading.value = false
+    }
+  }
+
   function startNewChat() {
     // 生成新的 sessionId
     const newSessionId = `session-${Date.now()}`
@@ -309,6 +478,7 @@ export const useChatStore = defineStore('chat', () => {
     loadDemos,
     loadHistory,
     sendMessageAndReceive,
+    submitApproval,
     clearHistory,
     switchDemo,
     startNewChat,

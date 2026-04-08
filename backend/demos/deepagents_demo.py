@@ -290,146 +290,218 @@ async def chat_stream(user_input: str, session_id: str = "default") -> AsyncIter
             yield chunk.content
 
 
-async def chat_stream_with_metadata(user_input: str, session_id: str = "default", user_id: str = "") -> AsyncIterator[str]:
+async def _process_stream(orchestrator, astream_input, config, user_id: str, session_id: str, tracker: AgentTracker) -> AsyncIterator[str]:
     """
-    流式聊天响应（包含元数据）
+    公共流式处理逻辑（chat_stream_with_metadata 和 chat_approve_stream 共用）
 
-    流结束时发送特殊的元数据标记，格式为：
-    \n__METADATA__:json字符串
+    使用双模式 stream_mode=["messages", "updates"]：
+    - messages 模式：处理 AI/tool 消息
+    - updates 模式：检测 interrupt 事件（审批请求）
 
-    Args:
-        user_input: 用户输入
-        session_id: 会话 ID（用于多轮对话）
+    遇到 interrupt 时 yield 审批事件，不发 __METADATA__。
+    正常完成时 yield __METADATA__。
 
     Yields:
-        Agent 的响应文本片段
+        流式文本片段、事件标记、元数据标记
     """
-    # 获取会话管理器和 orchestrator
+    from agents.deepagents import AgentContext
+    from datetime import datetime, timezone
+
+    INTERRUPT_KEY = "__interrupt__"
+
+    all_messages = []
+    interrupted = False
+
+    async for chunk in orchestrator.astream(
+        astream_input,
+        config=config,
+        context=AgentContext(user_id=user_id),
+        stream_mode=["messages", "updates"]
+    ):
+        # 双模式下 chunk 格式: (mode, payload)
+        if not isinstance(chunk, tuple) or len(chunk) < 2:
+            continue
+
+        mode, payload = chunk[0], chunk[1]
+
+        if mode == "messages":
+            # messages 模式：payload 是 (message, metadata) 元组
+            if isinstance(payload, tuple) and len(payload) >= 1:
+                message = payload[0]
+                all_messages.append(message)
+
+                msg_type = getattr(message, 'type', 'unknown')
+
+                if msg_type == 'ai' and hasattr(message, 'content') and message.content:
+                    content = message.content
+                    # 如果 AI 消息包含 tool_calls，记录调用信息
+                    tool_calls = getattr(message, 'tool_calls', None)
+                    if tool_calls:
+                        for tc in tool_calls:
+                            tc_name = tc.get('name', '') if isinstance(tc, dict) else getattr(tc, 'name', '')
+                            tc_args = tc.get('args', {}) if isinstance(tc, dict) else getattr(tc, 'args', {})
+                            logger.info(f"  🤖 模型调用工具: {tc_name}({json.dumps(tc_args, ensure_ascii=False)[:200]})")
+                    for i in range(0, len(content), 50):
+                        yield content[i:i+50]
+                        await asyncio.sleep(0.02)
+                elif msg_type == 'tool':
+                    tool_name = getattr(message, 'name', 'unknown_tool')
+                    tool_content = message.content if hasattr(message, 'content') else ""
+                    logger.info(f"  🔧 工具结果: {tool_name} → {tool_content[:200]}")
+                    if len(tool_content) > 1000:
+                        tool_content = tool_content[:1000] + "...(已截断)"
+                    tool_event = json.dumps({
+                        "type": "tool_call",
+                        "tool_name": tool_name,
+                        "output": tool_content,
+                        "status": "completed"
+                    }, ensure_ascii=False)
+                    yield f"\n__EVENT__:{tool_event}\n"
+
+        elif mode == "updates":
+            # updates 模式：检测 interrupt / 节点完成
+            if isinstance(payload, dict) and INTERRUPT_KEY not in payload:
+                node_name = next(iter(payload), None)
+                if node_name and node_name not in ("__interrupt__",):
+                    logger.debug(f"  ▶ 节点完成: {node_name}")
+            if isinstance(payload, dict) and INTERRUPT_KEY in payload:
+                interrupts = payload[INTERRUPT_KEY]
+                logger.info(f"  🛑 检测到 interrupt，共 {len(interrupts)} 个待审批操作")
+
+                # 提取 HITLRequest 中的 action 信息
+                actions = []
+                for intr in interrupts:
+                    value = intr.value if hasattr(intr, 'value') else intr
+                    if isinstance(value, dict):
+                        for action_req in value.get("action_requests", []):
+                            actions.append({
+                                "name": action_req.get("name", ""),
+                                "args": action_req.get("args", {}),
+                                "description": action_req.get("description", ""),
+                            })
+
+                # 所有 interrupt 统一发送审批事件，交由用户决定
+                interrupted = True
+                approval_event = json.dumps({
+                    "type": "approval_request",
+                    "actions": actions,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }, ensure_ascii=False)
+                yield f"\n__EVENT__:{approval_event}\n"
+                yield "\n"
+                logger.info(f"  📋 审批事件: {[a['name'] for a in actions]}")
+
+    if not interrupted:
+        # 正常完成（无 interrupt），发送元数据
+        # 从 checkpoint 读取当前轮完整消息（从最后一条 HumanMessage 起），
+        # 避免审批恢复后只统计到 resume 阶段的消息
+        turn_messages = all_messages
+        try:
+            state = await orchestrator.aget_state(config)
+            checkpoint_msgs = state.values.get("messages", [])
+            if checkpoint_msgs:
+                # 找到最后一条 HumanMessage 的位置，取其后的所有消息
+                last_human_idx = -1
+                for i, msg in enumerate(checkpoint_msgs):
+                    msg_type = getattr(msg, 'type', '') or (msg.get('type', '') if isinstance(msg, dict) else '')
+                    if msg_type == 'human':
+                        last_human_idx = i
+                if last_human_idx >= 0:
+                    turn_messages = checkpoint_msgs[last_human_idx + 1:]
+        except Exception as e:
+            logger.warning(f"  ⚠️ 读取 checkpoint 消息失败，使用流消息: {e}")
+
+        tracker.detect_and_log_tool_calls(turn_messages)
+
+        response_content = ""
+        for msg in reversed(turn_messages):
+            msg_type = getattr(msg, 'type', '') or (msg.get('type', '') if isinstance(msg, dict) else '')
+            if msg_type == 'ai':
+                content = msg.content if hasattr(msg, 'content') else msg.get('content', '') if isinstance(msg, dict) else ''
+                if content and content.strip():
+                    response_content = content
+                    break
+
+        detected_agent = detect_agent(response_content)
+        tracker.log_session_complete()
+
+        tracker_summary = tracker.get_summary()
+        skill_calls_data = tracker_summary.get("skill_calls", [])
+        skill_names = [call.get("skill_name", "") for call in skill_calls_data if call.get("skill_name")]
+        tool_calls_detail = extract_tool_calls_detail(turn_messages)
+
+        metadata = {
+            "agent_type": detected_agent,
+            "delegations": tracker_summary.get("delegation_count", 0),
+            "tool_calls": tracker_summary.get("tool_call_count", 0),
+            "skill_calls": tracker_summary.get("skill_call_count", 0),
+            "skills": skill_names,
+            "duration": tracker_summary.get("duration", 0.0),
+            "tool_calls_detail": tool_calls_detail,
+        }
+
+        logger.info(f"🟢 完成: agent={detected_agent}, tools={metadata.get('tool_calls', 0)}, duration={metadata.get('duration', 0):.1f}s")
+
+        yield f"\n__METADATA__:{json.dumps(metadata)}"
+    else:
+        logger.info("⏸️ 流暂停，等待用户审批")
+
+
+async def chat_stream_with_metadata(user_input: str, session_id: str = "default", user_id: str = "") -> AsyncIterator[str]:
+    """
+    流式聊天响应（包含元数据和审批支持）
+    """
     session_manager = get_session_manager()
     orchestrator = await get_orchestrator_with_store()
-
-    # 清空上下文变量，为新的请求准备
     clear_skill_calls_context()
 
-    # 创建跟踪器
     tracker = AgentTracker(session_id)
     tracker.log_session_start(user_input)
 
-    logger.info("=" * 60)
-    logger.info(f"🔵 [DeepAgents Demo] 收到流式请求")
-    logger.info(f"  Session ID: {session_id}")
-    logger.info(f"  用户输入: {user_input[:100]}...")
-    logger.info("=" * 60)
+    logger.info(f"🔵 收到请求: session={session_id}, input={user_input[:80]}")
 
-    # 收集所有消息用于元数据分析
-    all_messages = []
+    config = await session_manager.get_config(session_id, "deepagents")
+    astream_input = {"messages": [{"role": "user", "content": user_input}]}
 
-    # 获取会话配置（包含 thread_id）
+    async for chunk in _process_stream(orchestrator, astream_input, config, user_id, session_id, tracker):
+        yield chunk
+
+
+async def chat_approve_stream(
+    session_id: str = "default",
+    user_id: str = "",
+    decisions: list = None,
+) -> AsyncIterator[str]:
+    """
+    审批恢复流式响应
+    """
+    from langgraph.types import Command
+
+    session_manager = get_session_manager()
+    orchestrator = await get_orchestrator_with_store()
+
+    tracker = AgentTracker(session_id)
+    tracker.log_session_start("[approval-resume]")
+
+    logger.info(f"🔵 审批恢复: session={session_id}, decisions={decisions}")
+
     config = await session_manager.get_config(session_id, "deepagents")
 
-    from agents.deepagents import AgentContext
-    # 流式输出响应
-    async for chunk in orchestrator.astream(
-        {"messages": [{"role": "user", "content": user_input}]},
-        config=config,
-        context=AgentContext(user_id=user_id),
-        stream_mode="messages"
-    ):
-        # deepagents 的 astream 返回 tuple: (AIMessage, metadata)
-        if isinstance(chunk, tuple) and len(chunk) >= 1:
-            message = chunk[0]  # AIMessage
-            # 收集消息用于分析
-            all_messages.append(message)
+    hitl_decisions = []
+    for d in (decisions or []):
+        if d.get("type") == "approve":
+            hitl_decisions.append({"type": "approve"})
+        elif d.get("type") == "reject":
+            hitl_decisions.append({
+                "type": "reject",
+                "message": d.get("message", "用户拒绝了此操作"),
+            })
 
-            # print("流式消息:", message)
-            # 获取消息类型
-            msg_type = getattr(message, 'type', 'unknown')
-            logger.debug(f"  流式消息类型: {msg_type}")
+    resume_value = {"decisions": hitl_decisions}
+    astream_input = Command(resume=resume_value)
 
-            if msg_type == 'ai' and hasattr(message, 'content') and message.content:
-                # AI 消息：发送文本事件
-                content = message.content
-                # 每 50 个字符为一个块，模拟打字效果
-                for i in range(0, len(content), 50):
-                    yield content[i:i+50]
-                    await asyncio.sleep(0.02)
-            elif msg_type == 'tool':
-                # 工具消息：发送独立的工具事件（单独一行，便于前端解析）
-                tool_name = getattr(message, 'name', 'unknown_tool')
-                tool_content = message.content if hasattr(message, 'content') else ""
-                # 截断过长的输出
-                if len(tool_content) > 1000:
-                    tool_content = tool_content[:1000] + "...(已截断)"
-                # 发送工具事件（单独一行，使用 __EVENT__ 前缀）
-                tool_event = json.dumps({
-                    "type": "tool_call",
-                    "tool_name": tool_name,
-                    "output": tool_content,
-                    "status": "completed"
-                }, ensure_ascii=False)
-                yield f"\n__EVENT__:{tool_event}\n"
-                logger.info(f"  📦 发送工具事件: {tool_name}")
-        elif hasattr(chunk, 'content') and chunk.content:
-            # 兼容其他可能的格式（作为 AI 消息处理）
-            all_messages.append(chunk)
-            content = chunk.content
-            for i in range(0, len(content), 50):
-                yield content[i:i+50]
-                await asyncio.sleep(0.02)
-
-    # 使用跟踪器分析消息历史
-    tracker.detect_and_log_tool_calls(all_messages)
-
-    # 找到响应文本（优先使用 ai 类型消息，排除 tool 类型）
-    response_content = ""
-    # 反向遍历，找到最后一条 ai 类型的消息
-    for msg in reversed(all_messages):
-        msg_type = getattr(msg, 'type', '')
-        if msg_type == 'ai' and hasattr(msg, 'content') and msg.content:
-            response_content = msg.content
-            break
-    # 如果没有找到 ai 消息，使用最后一条非 tool 消息
-    if not response_content and all_messages:
-        for msg in reversed(all_messages):
-            msg_type = getattr(msg, 'type', '')
-            if msg_type != 'tool' and hasattr(msg, 'content') and msg.content:
-                response_content = msg.content
-                break
-
-    # 检测 agent 类型
-    detected_agent = detect_agent(response_content)
-
-    tracker.log_session_complete()
-
-    # 获取跟踪器摘要
-    tracker_summary = tracker.get_summary()
-
-    # 提取 skill 名称列表
-    skill_calls_data = tracker_summary.get("skill_calls", [])
-    skill_names = [call.get("skill_name", "") for call in skill_calls_data if call.get("skill_name")]
-
-    # 提取工具调用详情
-    tool_calls_detail = extract_tool_calls_detail(all_messages)
-
-    # 构建元数据
-    metadata = {
-        "agent_type": detected_agent,
-        "delegations": tracker_summary.get("delegation_count", 0),
-        "tool_calls": tracker_summary.get("tool_call_count", 0),
-        "skill_calls": tracker_summary.get("skill_call_count", 0),
-        "skills": skill_names,
-        "duration": tracker_summary.get("duration", 0.0),
-        "tool_calls_detail": tool_calls_detail  # 新增：工具调用详情
-    }
-
-    logger.info("=" * 60)
-    logger.info(f"🟢 [DeepAgents Demo] 流式响应完成")
-    logger.info(f"  检测到的 Agent: {detected_agent}")
-    logger.info(f"  元数据: {metadata}")
-    logger.info("=" * 60)
-
-    # 发送元数据标记（特殊格式，前端解析）
-    yield f"\n__METADATA__:{json.dumps(metadata)}"
+    async for chunk in _process_stream(orchestrator, astream_input, config, user_id, session_id, tracker):
+        yield chunk
 
 
 async def clear_history(session_id: str = "default"):
