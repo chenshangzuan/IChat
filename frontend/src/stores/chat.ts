@@ -7,8 +7,10 @@ import {
   clearHistory as clearHistoryApi,
   getDemos,
   getHistory,
+  getSessions,
   type AgentMetadata,
-  type ToolCallDetail
+  type ToolCallDetail,
+  type ChatSession
 } from '@/api/chat'
 
 export interface ApprovalAction {
@@ -305,6 +307,8 @@ export const useChatStore = defineStore('chat', () => {
       }
     } finally {
       isLoading.value = false
+      // 消息完成后刷新会话列表（新会话会出现在列表中）
+      loadSessionList()
     }
   }
 
@@ -458,14 +462,34 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function startNewChat() {
-    // 生成新的 sessionId
+  // 历史会话列表
+  const sessionList = ref<ChatSession[]>([])
+
+  async function loadSessionList() {
+    try {
+      sessionList.value = await getSessions(currentDemo.value)
+      console.log(`[ChatStore] 加载会话列表: ${sessionList.value.length} 个`)
+    } catch (error) {
+      console.error('Failed to load session list:', error)
+    }
+  }
+
+  function switchSession(targetSessionId: string) {
+    if (targetSessionId === sessionId.value) return
+
+    sessionId.value = targetSessionId
+    // 清空当前消息，由 loadHistory 重新加载
+    demoMessages.value.set(currentDemo.value, [])
+    loadHistory()
+    console.log('[ChatStore] 切换会话:', targetSessionId)
+  }
+
+  async function startNewChat() {
     const newSessionId = `session-${Date.now()}`
     sessionId.value = newSessionId
-
-    // 清空当前 demo 的消息
     demoMessages.value.set(currentDemo.value, [])
-
+    // 刷新会话列表
+    await loadSessionList()
     console.log('[ChatStore] 开始新聊天:', newSessionId)
   }
 
@@ -478,13 +502,16 @@ export const useChatStore = defineStore('chat', () => {
     sessionId,
     userId,
     setUserId,
-    demoMessages,  // 暴露给外部访问
+    demoMessages,
+    sessionList,
     loadDemos,
     loadHistory,
+    loadSessionList,
     sendMessageAndReceive,
     submitApproval,
     clearHistory,
     switchDemo,
+    switchSession,
     startNewChat,
   }
 })

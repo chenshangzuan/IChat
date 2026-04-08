@@ -189,3 +189,19 @@ export async function getHistory(
   })
   return response.data
 }
+
+export interface ChatSession {
+  session_id: string
+  title: string
+  timestamp: number
+  message_count: number
+}
+
+export async function getSessions(
+  demoId = 'deepagents'
+): Promise<ChatSession[]> {
+  const response = await api.get('/chat/sessions', {
+    params: { demo_id: demoId }
+  })
+  return response.data
+}

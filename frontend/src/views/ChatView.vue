@@ -35,8 +35,8 @@
         <span>新聊天</span>
       </div>
 
-      <!-- 历史聊天列表（占位） -->
-      <div class="history-section" v-if="showHistory">
+      <!-- 历史聊天列表 -->
+      <div class="history-section">
         <div class="section-header" @click="toggleHistory">
           <div class="section-title">
             <el-icon :size="18"><Clock /></el-icon>
@@ -46,10 +46,23 @@
             <ArrowDown />
           </el-icon>
         </div>
-        <div v-if="historyExpanded" class="history-list">
-          <div class="history-empty">
+        <div v-if="historyExpanded && chatSidebarExpanded" class="history-list">
+          <div
+            v-for="session in chatStore.sessionList"
+            :key="session.session_id"
+            class="history-item"
+            :class="{ active: chatStore.sessionId === session.session_id }"
+            @click="handleSwitchSession(session.session_id)"
+          >
+            <div class="history-item-title">{{ session.title }}</div>
+            <div class="history-item-meta">
+              <span>{{ formatSessionTime(session.timestamp) }}</span>
+              <span>{{ session.message_count }} 条消息</span>
+            </div>
+          </div>
+          <div v-if="chatStore.sessionList.length === 0" class="history-empty">
             <el-icon><Clock /></el-icon>
-            <span>即将推出</span>
+            <span>暂无历史聊天</span>
           </div>
         </div>
       </div>
@@ -368,8 +381,7 @@ async function handleApproval(msgId: string, decision: 'approve' | 'reject') {
 }
 
 // 历史聊天列表状态
-const showHistory = ref(true)
-const historyExpanded = ref(false)
+const historyExpanded = ref(true)
 
 // 二级侧边栏展开状态
 const chatSidebarExpanded = ref(true)
@@ -531,6 +543,11 @@ function handleNewChat() {
   inputMessage.value = ''
 }
 
+function handleSwitchSession(targetSessionId: string) {
+  chatStore.switchSession(targetSessionId)
+  inputMessage.value = ''
+}
+
 function handleSelectDemo(demoId: string) {
   chatStore.switchDemo(demoId)
 }
@@ -541,6 +558,17 @@ function handlePresetQuestion(question: string) {
 
 function toggleHistory() {
   historyExpanded.value = !historyExpanded.value
+}
+
+function formatSessionTime(timestamp: number): string {
+  if (!timestamp) return ''
+  const date = new Date(timestamp)
+  const now = new Date()
+  const isToday = date.toDateString() === now.toDateString()
+  if (isToday) {
+    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  }
+  return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
 }
 
 function toggleChatSidebar() {
@@ -557,6 +585,7 @@ function scrollToBottom() {
 
 onMounted(() => {
   chatStore.loadDemos()
+  chatStore.loadSessionList()
 })
 </script>
 
@@ -836,7 +865,49 @@ onMounted(() => {
 }
 
 .history-list {
-  padding: 8px;
+  padding: 4px 8px;
+  overflow-y: auto;
+  max-height: calc(100vh - 200px);
+}
+
+.history-item {
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s;
+  margin-bottom: 2px;
+}
+
+.history-item:hover {
+  background: #F1F5F9;
+}
+
+.history-item.active {
+  background: #EFF6FF;
+  border-left: 3px solid #3B82F6;
+  padding-left: 9px;
+}
+
+.history-item-title {
+  font-size: 13px;
+  color: #1E293B;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-item.active .history-item-title {
+  color: #1D4ED8;
+  font-weight: 500;
+}
+
+.history-item-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #94A3B8;
+  margin-top: 4px;
 }
 
 .history-empty {

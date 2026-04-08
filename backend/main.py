@@ -552,6 +552,81 @@ async def get_chat_history(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/chat/sessions", tags=["聊天"])
+async def get_chat_sessions(demo_id: str = "deepagents"):
+    """
+    获取指定 demo 的所有历史会话列表
+
+    从 checkpoint 数据库查询所有 thread_id，提取首条用户消息作为标题。
+
+    Returns:
+        会话列表，按时间倒序排列
+    """
+    from common.session_manager import get_session_manager
+
+    try:
+        session_manager = get_session_manager()
+        checkpointer = await session_manager._ensure_checkpointer()
+
+        # 查询所有属于该 demo 的 thread_id（格式: "demo_id:session_id"）
+        prefix = f"{demo_id}:"
+        async with checkpointer.lock:
+            cursor = await checkpointer.conn.execute(
+                "SELECT DISTINCT thread_id FROM checkpoints WHERE thread_id LIKE ? ORDER BY thread_id DESC",
+                (f"{prefix}%",)
+            )
+            rows = await cursor.fetchall()
+
+        sessions = []
+        for (thread_id,) in rows:
+            session_id = thread_id[len(prefix):]  # 去掉 "deepagents:" 前缀
+
+            # 获取该会话的 checkpoint，提取首条用户消息作为标题
+            config = {"configurable": {"thread_id": thread_id}}
+            checkpoint_tuple = await checkpointer.aget_tuple(config)
+            if not checkpoint_tuple:
+                continue
+
+            messages = checkpoint_tuple.checkpoint.get("channel_values", {}).get("messages", [])
+            title = ""
+            for msg in messages:
+                msg_type = getattr(msg, 'type', '') or (msg.get('type', '') if isinstance(msg, dict) else '')
+                if msg_type == 'human':
+                    content = msg.content if hasattr(msg, 'content') else msg.get('content', '')
+                    if content:
+                        title = content[:30].strip()
+                        if len(content) > 30:
+                            title += "..."
+                        break
+
+            if not title:
+                continue  # 跳过没有用户消息的会话
+
+            # 从 session_id 提取时间戳（格式: session-{timestamp}）
+            timestamp = 0
+            try:
+                ts_str = session_id.replace("session-", "")
+                timestamp = int(ts_str)
+            except (ValueError, IndexError):
+                pass
+
+            sessions.append({
+                "session_id": session_id,
+                "title": title,
+                "timestamp": timestamp,
+                "message_count": len(messages),
+            })
+
+        # 按时间戳倒序
+        sessions.sort(key=lambda s: s["timestamp"], reverse=True)
+        logger.info(f"📋 获取会话列表: demo={demo_id}, count={len(sessions)}")
+        return sessions
+
+    except Exception as e:
+        logger.error(f"❌ 获取会话列表失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ==================== 启动服务器 ====================
 
 if __name__ == "__main__":
