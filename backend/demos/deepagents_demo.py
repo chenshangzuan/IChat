@@ -341,9 +341,7 @@ async def _process_stream(orchestrator, astream_input, config, user_id: str, ses
                             tc_name = tc.get('name', '') if isinstance(tc, dict) else getattr(tc, 'name', '')
                             tc_args = tc.get('args', {}) if isinstance(tc, dict) else getattr(tc, 'args', {})
                             logger.info(f"  🤖 模型调用工具: {tc_name}({json.dumps(tc_args, ensure_ascii=False)[:200]})")
-                    for i in range(0, len(content), 50):
-                        yield content[i:i+50]
-                        await asyncio.sleep(0.02)
+                    yield content
                 elif msg_type == 'tool':
                     tool_name = getattr(message, 'name', 'unknown_tool')
                     tool_content = message.content if hasattr(message, 'content') else ""

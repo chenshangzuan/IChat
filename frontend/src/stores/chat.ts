@@ -266,9 +266,13 @@ export const useChatStore = defineStore('chat', () => {
                 console.error('Failed to parse metadata:', e)
               }
             }
-            // 普通内容行
-            else if (line) {
-              currentContent += (currentContent ? '\n' : '') + line
+            // 普通内容：直接拼接（不额外加换行，保留原始 markdown 格式）
+            else {
+              currentContent += line
+              // split('\n') 会丢失原始换行，需要在非最后一段后补回
+              if (i < lines.length - 1) {
+                currentContent += '\n'
+              }
               ensureAssistantMsg()
               currentAssistantMsg!.content = currentContent
             }

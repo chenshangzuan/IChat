@@ -91,14 +91,14 @@
                 </el-icon>
               </div>
               <div class="message-content">
-                <div class="tool-call-card" @click="toggleToolExpand(message.id)">
+                <div class="tool-call-card">
                   <div class="tool-card-header">
                     <span class="tool-icon-text">{{ getToolIcon(message.toolInfo?.toolName) }}</span>
                     <span class="tool-card-name">{{ formatToolName(message.toolInfo?.toolName) }}</span>
                     <el-tag size="small" :type="getToolStatusType(message.toolInfo?.status)">
                       {{ message.toolInfo?.status === 'completed' ? '完成' : message.toolInfo?.status }}
                     </el-tag>
-                    <el-icon class="expand-icon" :class="{ expanded: isToolExpanded(message.id) }">
+                    <el-icon class="expand-icon" :class="{ expanded: isToolExpanded(message.id) }" @click="toggleToolExpand(message.id)">
                       <ArrowDown />
                     </el-icon>
                   </div>
@@ -506,11 +506,6 @@ function getToolIcon(toolName?: string): string {
 function formatToolName(toolName?: string): string {
   if (!toolName) return '工具调用'
   return toolName
-    .replace(/[-_]/g, ' ')
-    .replace(/agent$/i, 'Agent')
-    .split(' ')
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ')
 }
 
 function getToolStatusType(status?: string): '' | 'success' | 'warning' | 'info' | 'danger' {
@@ -1274,7 +1269,6 @@ onMounted(() => {
   border: 1px solid #E2E8F0;
   border-radius: 12px;
   overflow: hidden;
-  cursor: pointer;
   transition: all 0.2s;
 }
 
@@ -1305,7 +1299,15 @@ onMounted(() => {
 .tool-card-header .expand-icon {
   transition: transform 0.3s;
   color: #94A3B8;
-  font-size: 14px;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.tool-card-header .expand-icon:hover {
+  color: #64748B;
+  background: #F1F5F9;
 }
 
 .tool-card-header .expand-icon.expanded {

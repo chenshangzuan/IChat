@@ -5,11 +5,16 @@ Deep Agents Multi-Agent 系统配置
 每个子代理通过 skills 参数指向技能目录。
 """
 from dataclasses import dataclass
+import warnings
 
 from deepagents import create_deep_agent
 from models import default_llm
 import logging
 import sys
+
+# 抑制 LangGraph checkpoint 序列化 context 字段时的 Pydantic 警告
+# （context_schema 的 dataclass 实例无法被 Pydantic 按 None 类型序列化，但不影响功能）
+warnings.filterwarnings("ignore", message=r"Pydantic serializer warnings", category=UserWarning)
 
 
 @dataclass
