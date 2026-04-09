@@ -386,7 +386,6 @@ async def _process_stream(orchestrator, astream_input, config, user_id: str, ses
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 }, ensure_ascii=False)
                 yield f"\n__EVENT__:{approval_event}\n"
-                yield "\n"
                 logger.info(f"  📋 审批事件: {[a['name'] for a in actions]}")
 
     if not interrupted:

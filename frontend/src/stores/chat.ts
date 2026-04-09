@@ -270,11 +270,11 @@ export const useChatStore = defineStore('chat', () => {
             }
             // 普通内容：直接拼接（不额外加换行，保留原始 markdown 格式）
             else {
-              currentContent += line
-              // split('\n') 会丢失原始换行，需要在非最后一段后补回
-              if (i < lines.length - 1) {
-                currentContent += '\n'
-              }
+              // 非最后一段补回 split 丢失的换行
+              const segment = (i < lines.length - 1) ? line + '\n' : line
+              // 跳过纯空白段（避免创建空助手消息）
+              if (!segment.trim() && !currentContent) continue
+              currentContent += segment
               ensureAssistantMsg()
               currentAssistantMsg!.content = currentContent
             }
@@ -290,6 +290,11 @@ export const useChatStore = defineStore('chat', () => {
         currentAssistantMsg.content = currentContent.trim()
         if (streamedMetadata) {
           currentAssistantMsg.agentMetadata = streamedMetadata
+        }
+        // 清理空内容的助手消息
+        if (!currentAssistantMsg.content) {
+          const idx = currentMessages.indexOf(currentAssistantMsg)
+          if (idx !== -1) currentMessages.splice(idx, 1)
         }
       }
 
