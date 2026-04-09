@@ -229,9 +229,32 @@
                   </div>
                 </div>
 
-                <div class="message-text" v-html="renderMarkdown(message.content)"></div>
-                <div class="message-time">
-                  {{ formatTime(message.timestamp) }}
+                <!-- 编辑模式（仅用户消息） -->
+                <div v-if="message.role === 'user' && editingMessageId === message.id" class="message-edit">
+                  <el-input
+                    v-model="editingContent"
+                    type="textarea"
+                    :autosize="{ minRows: 2, maxRows: 8 }"
+                    resize="none"
+                  />
+                  <div class="edit-actions">
+                    <el-button size="small" @click="cancelEdit">取消</el-button>
+                    <el-button size="small" type="primary" @click="confirmEdit(message.id)">发送</el-button>
+                  </div>
+                </div>
+                <!-- 正常显示 -->
+                <div v-else class="message-text" v-html="renderMarkdown(message.content)"></div>
+                <div class="message-footer">
+                  <span class="message-time">{{ formatTime(message.timestamp) }}</span>
+                  <!-- 用户消息操作按钮（hover 显示） -->
+                  <div v-if="message.role === 'user' && editingMessageId !== message.id" class="message-actions">
+                    <el-tooltip content="复制" placement="top">
+                      <el-icon class="action-icon" @click="copyMessage(message.content)"><CopyDocument /></el-icon>
+                    </el-tooltip>
+                    <el-tooltip content="编辑" placement="top">
+                      <el-icon class="action-icon" @click="startEdit(message)"><EditPen /></el-icon>
+                    </el-tooltip>
+                  </div>
                 </div>
               </div>
             </template>
@@ -353,10 +376,13 @@ import {
   QuestionFilled,
   MagicStick,
   Edit,
+  EditPen,
   ArrowDown,
   ArrowLeft,
   ArrowRight,
+  CopyDocument,
 } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github.css'
@@ -397,6 +423,8 @@ const presetQuestionsMap: Record<string, string[]> = {
     '帮我把这个接口操作符规范化：zec:elasticIp:listNetworkTypes',
     '帮我写一首关于元旦节的诗，然后存到/memories/ 目录下',
     '查看/memories/ 目录下有哪些文件',
+    '帮我创建一个test.txt文件，然后存到/memories/shared/ 目录下',
+    '查看/memories/shared/ 目录下有哪些文件',
   ],
   'basic-chat': [
     '什么是 LangChain？',
@@ -527,6 +555,48 @@ function getToolStatusType(status?: string): '' | 'success' | 'warning' | 'info'
     'failed': 'danger',
   }
   return types[status || ''] || 'info'
+}
+
+// 编辑消息相关状态
+const editingMessageId = ref<string | null>(null)
+const editingContent = ref('')
+
+function startEdit(message: any) {
+  editingMessageId.value = message.id
+  editingContent.value = message.content
+}
+
+function cancelEdit() {
+  editingMessageId.value = null
+  editingContent.value = ''
+}
+
+async function confirmEdit(messageId: string) {
+  const newContent = editingContent.value.trim()
+  if (!newContent) return
+
+  // 找到消息在列表中的索引
+  const messages = chatStore.messages
+  const msgIndex = messages.findIndex(m => m.id === messageId)
+  if (msgIndex === -1) return
+
+  // 调用后端截断 checkpoint
+  try {
+    await chatStore.editMessage(messageId, msgIndex, newContent)
+    editingMessageId.value = null
+    editingContent.value = ''
+    scrollToBottom()
+  } catch (e) {
+    ElMessage.error('编辑失败，请重试')
+  }
+}
+
+function copyMessage(content: string) {
+  navigator.clipboard.writeText(content).then(() => {
+    ElMessage.success({ message: '已复制', duration: 1500 })
+  }).catch(() => {
+    ElMessage.error('复制失败')
+  })
 }
 
 async function handleSend() {
@@ -1153,10 +1223,78 @@ onMounted(() => {
   font-size: 13px;
 }
 
+.message-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  position: relative;
+}
+
+.message.user .message-footer {
+  justify-content: flex-end;
+}
+
 .message-time {
   font-size: 12px;
   color: #909399;
-  margin-top: 4px;
+}
+
+.message-actions {
+  display: none;
+  gap: 6px;
+}
+
+.message:hover .message-actions {
+  display: flex;
+}
+
+.message-footer {
+  min-height: 24px;
+}
+
+.action-icon {
+  font-size: 18px;
+  color: #94A3B8;
+  cursor: pointer;
+  padding: 3px;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.action-icon:hover {
+  color: #3B82F6;
+  background: #EFF6FF;
+}
+
+.message-edit {
+  width: 640px;
+  max-width: 80vw;
+  margin-top: 8px;
+}
+
+.message-edit .el-textarea {
+  margin-bottom: 8px;
+}
+
+.message-edit :deep(.el-textarea__inner) {
+  border: 1px solid #EDE9FE;
+  border-radius: 16px;
+  padding: 16px 20px;
+  font-size: 14px;
+  line-height: 1.6;
+  box-shadow: 0 2px 12px rgba(124, 58, 237, 0.08);
+}
+
+.message-edit :deep(.el-textarea__inner:focus) {
+  border-color: #A78BFA;
+  box-shadow: 0 2px 12px rgba(124, 58, 237, 0.15);
+}
+
+.edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .message.loading .message-text {

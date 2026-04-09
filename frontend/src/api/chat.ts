@@ -166,6 +166,22 @@ export async function clearHistory(
 }
 
 /**
+ * 编辑消息：截断 checkpoint 到指定消息索引
+ */
+export async function editMessageApi(
+  sessionId: string,
+  demoId: string,
+  messageIndex: number
+) {
+  const response = await api.post('/chat/edit', {
+    session_id: sessionId,
+    demo_id: demoId,
+    message_index: messageIndex,
+  })
+  return response.data
+}
+
+/**
  * 获取对话历史消息
  */
 export interface HistoryMessage {

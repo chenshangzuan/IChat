@@ -33,6 +33,13 @@ class ChatRequest(BaseModel):
     user_id: str = ""  # 用户 ID，用于记忆命名空间隔离
 
 
+class EditMessageRequest(BaseModel):
+    """编辑消息请求模型"""
+    session_id: str
+    demo_id: str = "deepagents"
+    message_index: int  # 被编辑消息在 checkpoint messages 中的索引
+
+
 class ApprovalDecision(BaseModel):
     """审批决策"""
     type: str  # "approve" | "reject"
@@ -369,6 +376,52 @@ async def clear_chat_history(request: ChatRequest):
         raise
     except Exception as e:
         logger.error(f"❌ 清空历史失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/chat/edit", tags=["聊天"])
+async def edit_message(request: EditMessageRequest):
+    """
+    编辑消息：截断 checkpoint 消息历史到指定索引
+
+    删除 message_index 及之后的所有消息，以便前端用编辑后的内容重新发送。
+    使用 LangGraph 的 update_state 将 messages 截断。
+    """
+    from common.session_manager import get_session_manager
+    from agents import get_orchestrator_with_store
+    from langchain_core.messages import RemoveMessage
+
+    try:
+        logger.info(f"✏️ 编辑消息: session={request.session_id}, index={request.message_index}")
+
+        session_manager = get_session_manager()
+        config = await session_manager.get_config(request.session_id, request.demo_id)
+
+        orchestrator = await get_orchestrator_with_store()
+        state = await orchestrator.aget_state(config)
+
+        messages = state.values.get("messages", [])
+        if request.message_index < 0 or request.message_index >= len(messages):
+            raise HTTPException(status_code=400, detail=f"无效的消息索引: {request.message_index}")
+
+        # 用 RemoveMessage 删除 message_index 及之后的所有消息
+        # add_messages reducer 会识别 RemoveMessage 并从状态中移除对应消息
+        messages_to_remove = messages[request.message_index:]
+        remove_ops = [RemoveMessage(id=msg.id) for msg in messages_to_remove if hasattr(msg, 'id') and msg.id]
+
+        await orchestrator.aupdate_state(config, {"messages": remove_ops})
+
+        logger.info(f"✅ 消息已截断: {len(messages)} → {len(messages) - len(remove_ops)}, 删除 {len(remove_ops)} 条")
+        return {
+            "status": "success",
+            "original_count": len(messages),
+            "truncated_count": len(messages) - len(remove_ops),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 编辑消息失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

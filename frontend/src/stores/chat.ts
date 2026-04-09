@@ -5,6 +5,7 @@ import {
   sendMessageStream,
   sendApprovalStream,
   clearHistory as clearHistoryApi,
+  editMessageApi,
   getDemos,
   getHistory,
   getSessions,
@@ -330,6 +331,20 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  async function editMessage(messageId: string, msgIndex: number, newContent: string) {
+    const currentMessages = demoMessages.value.get(currentDemo.value)
+    if (!currentMessages) return
+
+    // 调用后端截断 checkpoint（删除该消息及之后的所有消息）
+    await editMessageApi(sessionId.value, currentDemo.value, msgIndex)
+
+    // 前端截断：移除该消息及之后的所有消息
+    currentMessages.splice(msgIndex)
+
+    // 用编辑后的内容重新发送
+    await sendMessageAndReceive(newContent)
+  }
+
   function switchDemo(demoId: string) {
     const demo = demos.value.find(d => d.id === demoId)
     if (!demo || demo.coming_soon) {
@@ -513,6 +528,7 @@ export const useChatStore = defineStore('chat', () => {
     loadHistory,
     loadSessionList,
     sendMessageAndReceive,
+    editMessage,
     submitApproval,
     clearHistory,
     switchDemo,
