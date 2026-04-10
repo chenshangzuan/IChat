@@ -9,6 +9,7 @@ import warnings
 
 from deepagents import create_deep_agent
 from models import default_llm
+from common.agent_registry import get_by_type
 import logging
 import sys
 
@@ -32,6 +33,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+_coder = get_by_type("coder")
+_sre = get_by_type("sre")
+
+
 def _build_coder_prompt() -> str:
     """构建 Coder Agent 的系统提示词（动态加载 skills）"""
     from agents.skill_loader import get_coder_skills, format_skills_list
@@ -43,8 +48,8 @@ def _build_coder_prompt() -> str:
 {skills_info}
 
 ## 规则
-- 禁止使用任何工具，直接在响应中提供代码
-- 响应以 "👨‍💻 **Coder Agent**: [任务摘要]" 开头
+- 在响应中提供代码
+- 响应以 "{_coder.icon} **{_coder.display_name}**: [任务摘要]" 开头
 - 代码使用 markdown 代码块格式
 - 提供完整、可运行的代码
 """
@@ -52,7 +57,7 @@ def _build_coder_prompt() -> str:
 
 # 定义 Coder 子代理
 coder_subagent = {
-    "name": "coder-agent",
+    "name": _coder.subagent_name,
     "description": "Expert coder for writing, reviewing, and optimizing code. Use this agent for any code-related tasks.",
     "model": default_llm,
     "tools": [],
@@ -71,33 +76,15 @@ def _build_sre_prompt() -> str:
 ## 技能
 {skills_info}
 
-## 服务名称映射（必须遵守）
-| 输入 | 正确输出 |
-|---|---|
-| ecs, ECS, EC2, VM, Server, 云服务器 | **ZEC** |
-| rds, RDS, Database, MySQL, PostgreSQL | **DB** |
-| oss, OSS, S3, Storage, 对象存储 | **BMC** |
-| vpc, VPC, Network, 网络 | **Network** |
-| iam, IAM, Identity, Permission, 权限 | **IAM** |
-
-## 动词映射（必须遵守）
-| 非标准 | 正确标准 |
-|---|---|
-| Query, Search, Find | **List** 或 **Describe** |
-| Fetch, Retrieve, Show, View | **Get** 或 **Describe** |
-| Read | **Get** |
-
-格式：`[Action] [Service] [Resource]`，如 `List ZEC Instance`、`Get BMC Bucket`
-
 ## 规则
-- 禁止使用任何工具，直接在响应中提供答案
-- 响应以 "🔧 **SRE Agent**: [任务摘要]" 开头
+- 在响应中提供答案
+- 响应以 "{_sre.icon} **{_sre.display_name}**: [任务摘要]" 开头
 """
 
 
 # 定义 SRE 子代理
 sre_subagent = {
-    "name": "sre-agent",
+    "name": _sre.subagent_name,
     "description": "Expert SRE for deployment, log analysis, SQL auditing, and infrastructure tasks. Use this agent for operations-related work.",
     "model": default_llm,
     "tools": [],
@@ -139,21 +126,21 @@ def create_orchestrator(checkpointer=None, store=None):
 
 ## 委托规则
 
-**委托给 coder-agent**（关键词：写代码、编写代码、创建代码、代码实现、算法、编程语言名、debug、优化代码）
-**委托给 sre-agent**（关键词：日志、部署、SQL、数据库、Nginx、服务器、运维、审计、规范化）
+**委托给 {_coder.subagent_name}**（关键词：写代码、编写代码、创建代码、代码实现、算法、编程语言名、debug、优化代码）
+**委托给 {_sre.subagent_name}**（关键词：日志、部署、SQL、数据库、Nginx、服务器、运维、审计、规范化）
 **由 Orchestrator 直接处理**（关键词：写文件、保存文件、写诗、写文章、生成内容并保存）
 
 ## 可用专家
 
-### 👨‍💻 Coder Agent
+### {_coder.icon} {_coder.display_name}
 {coder_skills_info}
 
-### 🔧 SRE Agent
+### {_sre.icon} {_sre.display_name}
 {sre_skills_info}
 
 ## 响应格式
 - 直接回答：友好回复
-- 委托后：总结结果，如 "👨‍💻 **Coder Agent 完成**: [摘要]"
+- 委托后：总结结果，如 "{_coder.icon} **{_coder.display_name} 完成**: [摘要]"
 
 ## 文件路径规则（重要！）
 

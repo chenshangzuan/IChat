@@ -12,10 +12,8 @@ import asyncio
 import json
 
 from agents import get_orchestrator_with_store
-from agents.skill_tracking_middleware import (
-    clear_skill_calls_context,
-)
 from common.agent_tracker import AgentTracker
+from common.agent_registry import detect_agent_type as detect_agent
 from common.session_manager import get_session_manager
 
 # 配置日志 - 确保在终端中可见
@@ -26,56 +24,6 @@ logging.basicConfig(
     force=True
 )
 logger = logging.getLogger(__name__)
-
-
-def detect_agent(response: str) -> str:
-    """
-    从响应中检测是哪个 agent 在回复
-
-    与 AgentTracker._detect_agent_type() 保持一致的逻辑
-
-    Args:
-        response: Agent 响应文本
-
-    Returns:
-        Agent 类型: "orchestrator", "coder", "sre"
-        默认返回 "orchestrator"（因为这是主代理）
-    """
-    import re
-
-    response_lower = response.lower()
-
-    # 先检测 Orchestrator 的特征（更优先，避免误判）
-    # 如果包含这些介绍性关键词，很可能是 Orchestrator 在介绍系统
-    orchestrator_indicators = [
-        r"orchestrator\s*agent",
-        r"协调以下专家",
-        r"协调.*专家.*agent",
-        r"我会.*委托",
-        r"请告诉我.*需要",
-    ]
-
-    for indicator in orchestrator_indicators:
-        if re.search(indicator, response_lower):
-            return "orchestrator"
-
-    # 检测子代理的签名响应 - 必须在开头且是签名格式
-    # Coder Agent 签名：必须在开头，且有冒号，后面不是" - "（列表格式）
-    coder_sig_pattern = r"^[\s\S]{0,60}👨‍💻\s*\*\*\s*coder[ -]agent\s*\*\*\s*:(?!.*\s-\s)"
-    if re.search(coder_sig_pattern, response_lower):
-        return "coder"
-
-    # SRE Agent 签名
-    sre_sig_pattern = r"^[\s\S]{0,60}🔧\s*\*\*\s*sre[ -]agent\s*\*\*\s*:(?!.*\s-\s)"
-    if re.search(sre_sig_pattern, response_lower):
-        return "sre"
-
-    # 检查是否是 Orchestrator 的汇总（包含 "Agent 完成"）
-    if re.search(r"agent\s+完成|完成\s*任务", response_lower):
-        return "orchestrator"
-
-    # 默认返回 orchestrator
-    return "orchestrator"
 
 
 def extract_tool_calls_detail(messages: list) -> list[dict]:
@@ -332,16 +280,18 @@ async def _process_stream(orchestrator, astream_input, config, user_id: str, ses
 
                 msg_type = getattr(message, 'type', 'unknown')
 
-                if msg_type == 'ai' and hasattr(message, 'content') and message.content:
-                    content = message.content
-                    # 如果 AI 消息包含 tool_calls，记录调用信息
+                if msg_type == 'ai':
+                    # 记录 tool_calls（无论 content 是否为空）
                     tool_calls = getattr(message, 'tool_calls', None)
                     if tool_calls:
                         for tc in tool_calls:
                             tc_name = tc.get('name', '') if isinstance(tc, dict) else getattr(tc, 'name', '')
                             tc_args = tc.get('args', {}) if isinstance(tc, dict) else getattr(tc, 'args', {})
                             logger.info(f"  🤖 模型调用工具: {tc_name}({json.dumps(tc_args, ensure_ascii=False)[:200]})")
-                    yield content
+                    # 有文本内容时 yield
+                    content = getattr(message, 'content', '')
+                    if content:
+                        yield content
                 elif msg_type == 'tool':
                     tool_name = getattr(message, 'name', 'unknown_tool')
                     tool_content = message.content if hasattr(message, 'content') else ""
@@ -423,16 +373,12 @@ async def _process_stream(orchestrator, astream_input, config, user_id: str, ses
         tracker.log_session_complete()
 
         tracker_summary = tracker.get_summary()
-        skill_calls_data = tracker_summary.get("skill_calls", [])
-        skill_names = [call.get("skill_name", "") for call in skill_calls_data if call.get("skill_name")]
         tool_calls_detail = extract_tool_calls_detail(turn_messages)
 
         metadata = {
             "agent_type": detected_agent,
             "delegations": tracker_summary.get("delegation_count", 0),
             "tool_calls": tracker_summary.get("tool_call_count", 0),
-            "skill_calls": tracker_summary.get("skill_call_count", 0),
-            "skills": skill_names,
             "duration": tracker_summary.get("duration", 0.0),
             "tool_calls_detail": tool_calls_detail,
         }
@@ -450,7 +396,6 @@ async def chat_stream_with_metadata(user_input: str, session_id: str = "default"
     """
     session_manager = get_session_manager()
     orchestrator = await get_orchestrator_with_store()
-    clear_skill_calls_context()
 
     tracker = AgentTracker(session_id)
     tracker.log_session_start(user_input)

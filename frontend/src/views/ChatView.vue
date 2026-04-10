@@ -209,17 +209,6 @@
                         {{ message.agentMetadata.tool_calls }}
                       </span>
                     </el-tooltip>
-                    <el-tooltip content="Skill 调用" placement="top">
-                      <span class="stat-item">
-                        <el-icon><MagicStick /></el-icon>
-                        {{ message.agentMetadata.skill_calls }}
-                      </span>
-                    </el-tooltip>
-                    <el-tooltip v-if="message.agentMetadata.skills && message.agentMetadata.skills.length > 0" :content="`使用的 Skills: ${message.agentMetadata.skills.join(', ')}`" placement="top">
-                      <span class="stat-item skills-badge">
-                        {{ message.agentMetadata.skills.map(s => getSkillIcon(s)).join(' ') }}
-                      </span>
-                    </el-tooltip>
                     <el-tooltip content="耗时" placement="top">
                       <span class="stat-item">
                         <el-icon><Clock /></el-icon>
@@ -374,7 +363,6 @@ import {
   Tools,
   Clock,
   QuestionFilled,
-  MagicStick,
   Edit,
   EditPen,
   ArrowDown,
@@ -487,22 +475,6 @@ function getAgentTagType(agentType?: string): string {
     'sre': 'warning',
   }
   return types[agentType || 'orchestrator'] || 'primary'
-}
-
-function getSkillIcon(skillName: string): string {
-  const icons: Record<string, string> = {
-    // Coder skills
-    'code-generation': '✨',
-    'code-optimization': '⚡',
-    'code-review': '🔍',
-    // SRE skills
-    'log-analysis': '📊',
-    'deployment': '🚀',
-    'sql-audit': '🗄️',
-    'audit-log-normalization': '📋',
-    'sre-operations': '🔧',
-  }
-  return icons[skillName] || '🎨'
 }
 
 // 工具消息展开状态（默认全部展开）
@@ -1642,11 +1614,4 @@ onMounted(() => {
   font-size: 14px;
 }
 
-.skills-badge {
-  font-size: 14px;
-  padding: 2px 6px;
-  background: #f0f0f0;
-  border-radius: 4px;
-  margin-left: 4px;
-}
 </style>
