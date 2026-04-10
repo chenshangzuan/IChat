@@ -48,7 +48,8 @@ def make_backend(runtime):
     Returns:
         PatchedCompositeBackend 实例
     """
-    from deepagents.backends import CompositeBackend, StateBackend, StoreBackend
+    from pathlib import Path
+    from deepagents.backends import CompositeBackend, StateBackend, StoreBackend, FilesystemBackend
     from deepagents.backends.store import BackendContext
 
     def get_memories_namespace(ctx: BackendContext) -> tuple[str, ...]:
@@ -56,11 +57,16 @@ def make_backend(runtime):
         user_id = getattr(ctx.runtime.context, "user_id", "") if ctx.runtime.context else ""
         return ("memories", user_id or "default")
 
+    # backend/ 目录下的 skills 目录绝对路径
+    project_dir = Path(__file__).resolve().parent.parent
+    skills_dir = project_dir / "skills"
+
     composite = CompositeBackend(
         default=StateBackend(runtime),
         routes={
             "/memories/": StoreBackend(runtime, namespace=get_memories_namespace),
-            "/memories/shared/": StoreBackend(runtime, namespace=lambda ctx: ("memories-shared",))
+            "/memories/shared/": StoreBackend(runtime, namespace=lambda ctx: ("memories-shared",)),
+            "/skills/": FilesystemBackend(root_dir=str(skills_dir), virtual_mode=True),
         }
     )
     return PatchedCompositeBackend(composite)
