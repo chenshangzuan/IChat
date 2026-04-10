@@ -149,7 +149,7 @@ class ZhipuChatModel(BaseChatModel):
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
             },
-            timeout=300.0,  # 5 分钟超时，与前端保持一致
+            timeout=httpx.Timeout(connect=30.0, read=300.0, write=30.0, pool=30.0),
         ) as client:
             response = await client.post(
                 # "https://open.bigmodel.cn/api/paas/v4/chat/completions",
