@@ -219,3 +219,12 @@ export async function getSessions(
   })
   return response.data
 }
+
+export async function deleteSession(
+  sessionId: string,
+  demoId = 'deepagents'
+): Promise<void> {
+  await api.delete(`/chat/sessions/${sessionId}`, {
+    params: { demo_id: demoId }
+  })
+}

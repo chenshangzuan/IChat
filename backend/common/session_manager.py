@@ -114,14 +114,17 @@ class SessionManager:
             demo_id: Demo ID
         """
         await self._ensure_checkpointer()
-        config = await self.get_config(session_id, demo_id)
-        thread_id = config["configurable"]["thread_id"]
+        thread_id = f"{demo_id}:{session_id}"
 
-        # 删除 checkpoint
-        if hasattr(self.checkpointer, 'a'):
-            await self.checkpointer.a.delete(config)
-        else:
-            self.checkpointer.delete(config)
+        # 直接通过 SQL 删除 checkpoint 和 writes 记录
+        async with self.checkpointer.lock:
+            await self.checkpointer.conn.execute(
+                "DELETE FROM checkpoints WHERE thread_id = ?", (thread_id,)
+            )
+            await self.checkpointer.conn.execute(
+                "DELETE FROM writes WHERE thread_id = ?", (thread_id,)
+            )
+            await self.checkpointer.conn.commit()
 
         # 从活跃会话中移除
         session_key = f"{demo_id}:{session_id}"

@@ -672,6 +672,46 @@ async def get_chat_sessions(demo_id: str = "deepagents"):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.delete("/api/chat/sessions/{session_id}", tags=["聊天"])
+async def delete_session(session_id: str, demo_id: str = "deepagents"):
+    """
+    删除指定会话
+
+    删除指定会话的所有数据（checkpoint）。
+
+    Args:
+        session_id: 会话 ID
+        demo_id: Demo ID
+
+    Returns:
+        确认消息
+    """
+    try:
+        logger.info(f"🗑️ 收到删除会话请求: demo={demo_id}, session={session_id}")
+
+        if demo_id == "basic-chat":
+            basic_chat.clear_history(session_id)
+        elif demo_id == "deepagents":
+            await deepagents_demo.clear_history(session_id)
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"未知的 demo_id: {demo_id}. 可用选项: basic-chat, deepagents"
+            )
+
+        return {
+            "status": "success",
+            "message": "会话已删除",
+            "session_id": session_id,
+            "demo_id": demo_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 删除会话失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ==================== 启动服务器 ====================
 
 if __name__ == "__main__":

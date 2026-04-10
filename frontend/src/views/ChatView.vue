@@ -54,10 +54,17 @@
             :class="{ active: chatStore.sessionId === session.session_id }"
             @click="handleSwitchSession(session.session_id)"
           >
-            <div class="history-item-title">{{ session.title }}</div>
-            <div class="history-item-meta">
-              <span>{{ formatSessionTime(session.timestamp) }}</span>
-              <span>{{ session.message_count }} 条消息</span>
+            <div class="history-item-content">
+              <div class="history-item-title">{{ session.title }}</div>
+              <div class="history-item-meta">
+                <span>{{ formatSessionTime(session.timestamp) }}</span>
+                <span>{{ session.message_count }} 条消息</span>
+              </div>
+            </div>
+            <div class="history-item-delete" @click.stop="handleDeleteSession(session.session_id)">
+              <el-icon :size="14">
+                <Delete />
+              </el-icon>
             </div>
           </div>
           <div v-if="chatStore.sessionList.length === 0" class="history-empty">
@@ -369,8 +376,9 @@ import {
   ArrowLeft,
   ArrowRight,
   CopyDocument,
+  Delete,
 } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github.css'
@@ -588,6 +596,26 @@ function handleNewChat() {
 function handleSwitchSession(targetSessionId: string) {
   chatStore.switchSession(targetSessionId)
   inputMessage.value = ''
+}
+
+async function handleDeleteSession(targetSessionId: string) {
+  try {
+    await ElMessageBox.confirm(
+      '确定要删除这个会话吗？删除后无法恢复。',
+      '删除会话',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }
+    )
+    await chatStore.deleteSession(targetSessionId)
+    ElMessage.success({ message: '会话已删除', duration: 1500 })
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      ElMessage.error('删除失败，请重试')
+    }
+  }
 }
 
 function handleSelectDemo(demoId: string) {
@@ -918,6 +946,15 @@ onMounted(() => {
   cursor: pointer;
   transition: background 0.2s;
   margin-bottom: 2px;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.history-item-content {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .history-item:hover {
@@ -950,6 +987,27 @@ onMounted(() => {
   font-size: 11px;
   color: #94A3B8;
   margin-top: 4px;
+}
+
+.history-item-delete {
+  opacity: 0;
+  transition: opacity 0.2s, color 0.2s, background 0.2s;
+  color: #94A3B8;
+  flex-shrink: 0;
+  padding: 2px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.history-item:hover .history-item-delete {
+  opacity: 1;
+}
+
+.history-item-delete:hover {
+  color: #EF4444;
+  background: #FEE2E2;
 }
 
 .history-empty {

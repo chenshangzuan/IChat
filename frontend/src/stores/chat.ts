@@ -9,6 +9,7 @@ import {
   getDemos,
   getHistory,
   getSessions,
+  deleteSession as deleteSessionApi,
   type AgentMetadata,
   type ToolCallDetail,
   type ChatSession
@@ -513,6 +514,22 @@ export const useChatStore = defineStore('chat', () => {
     console.log('[ChatStore] 开始新聊天:', newSessionId)
   }
 
+  async function deleteSession(targetSessionId: string) {
+    try {
+      await deleteSessionApi(targetSessionId, currentDemo.value)
+      // 如果删除的是当前活跃会话，切换到新聊天
+      if (targetSessionId === sessionId.value) {
+        await startNewChat()
+      }
+      // 刷新会话列表
+      await loadSessionList()
+      console.log('[ChatStore] 删除会话:', targetSessionId)
+    } catch (error) {
+      console.error('Failed to delete session:', error)
+      throw error
+    }
+  }
+
   return {
     messages,
     currentDemo,
@@ -534,5 +551,6 @@ export const useChatStore = defineStore('chat', () => {
     switchDemo,
     switchSession,
     startNewChat,
+    deleteSession,
   }
 })
