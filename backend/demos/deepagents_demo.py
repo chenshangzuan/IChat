@@ -11,6 +11,8 @@ import sys
 import asyncio
 import json
 
+from common.sse import sse_content, sse_event
+
 from agents import get_orchestrator_with_store
 from common.agent_tracker import AgentTracker
 from common.agent_registry import detect_agent_type as detect_agent
@@ -235,27 +237,23 @@ async def chat_stream(user_input: str, session_id: str = "default") -> AsyncIter
     ):
         # 提取内容块
         if hasattr(chunk, 'content'):
-            yield chunk.content
+            yield sse_content(chunk.content)
 
 
 async def _process_stream(orchestrator, astream_input, config, user_id: str, session_id: str, tracker: AgentTracker) -> AsyncIterator[str]:
     """
     公共流式处理逻辑（chat_stream_with_metadata 和 chat_approve_stream 共用）
 
-    使用双模式 stream_mode=["messages", "updates"]：
+    使用单模式 stream_mode="messages"：
     - messages 模式：处理 AI/tool 消息
-    - updates 模式：检测 interrupt 事件（审批请求）
 
-    遇到 interrupt 时 yield 审批事件，不发 __METADATA__。
-    正常完成时 yield __METADATA__。
+    注意：updates 模式会导致 astream 永远不完成，因此不使用。
 
     Yields:
         流式文本片段、事件标记、元数据标记
     """
     from agents.deepagents import AgentContext
     from datetime import datetime, timezone
-
-    INTERRUPT_KEY = "__interrupt__"
 
     all_messages = []
     interrupted = False
@@ -266,57 +264,66 @@ async def _process_stream(orchestrator, astream_input, config, user_id: str, ses
         context=AgentContext(user_id=user_id),
         stream_mode=["messages", "updates"]
     ):
-        # 双模式下 chunk 格式: (mode, payload)
+        # 双模式下chunk是(mode, payload)元组
         if not isinstance(chunk, tuple) or len(chunk) < 2:
+            logger.warning(f"  ⚠️ chunk格式不符预期: type={type(chunk).__name__}")
             continue
 
         mode, payload = chunk[0], chunk[1]
 
         if mode == "messages":
-            # messages 模式：payload 是 (message, metadata) 元组
+            # payload是(message, metadata)元组
             if isinstance(payload, tuple) and len(payload) >= 1:
                 message = payload[0]
-                all_messages.append(message)
+            else:
+                message = payload
 
-                msg_type = getattr(message, 'type', 'unknown')
+            all_messages.append(message)
 
-                if msg_type == 'ai':
-                    # 记录 tool_calls（无论 content 是否为空）
-                    tool_calls = getattr(message, 'tool_calls', None)
-                    if tool_calls:
-                        for tc in tool_calls:
-                            tc_name = tc.get('name', '') if isinstance(tc, dict) else getattr(tc, 'name', '')
-                            tc_args = tc.get('args', {}) if isinstance(tc, dict) else getattr(tc, 'args', {})
-                            logger.info(f"  🤖 模型调用工具: {tc_name}({json.dumps(tc_args, ensure_ascii=False)[:200]})")
-                    # 有文本内容时 yield
-                    content = getattr(message, 'content', '')
-                    if content:
-                        yield content
-                elif msg_type == 'tool':
-                    tool_name = getattr(message, 'name', 'unknown_tool')
-                    tool_content = message.content if hasattr(message, 'content') else ""
-                    logger.info(f"  🔧 工具结果: {tool_name} → {tool_content[:200]}")
-                    if len(tool_content) > 1000:
-                        tool_content = tool_content[:1000] + "...(已截断)"
-                    tool_event = json.dumps({
-                        "type": "tool_call",
-                        "tool_name": tool_name,
-                        "output": tool_content,
-                        "status": "completed"
-                    }, ensure_ascii=False)
-                    yield f"\n__EVENT__:{tool_event}\n"
+            # 检查消息类型（兼容AIMessage/AIMessageChunk和ToolMessage/ToolMessageChunk）
+            msg_type = getattr(message, 'type', 'unknown')
+            msg_class = message.__class__.__name__
+            is_ai_message = msg_type == 'ai' or 'ai' in msg_class.lower()
+            is_tool_message = msg_type == 'tool' or 'tool' in msg_class.lower()
+
+            if is_ai_message:
+                # 记录 tool_calls
+                tool_calls = getattr(message, 'tool_calls', None)
+                if tool_calls:
+                    for tc in tool_calls:
+                        tc_name = tc.get('name', '') if isinstance(tc, dict) else getattr(tc, 'name', '')
+                        tc_args = tc.get('args', {}) if isinstance(tc, dict) else getattr(tc, 'args', {})
+                        logger.info(f"  🤖 模型调用工具: {tc_name}({json.dumps(tc_args, ensure_ascii=False)[:200]})")
+
+                # 发送文本内容
+                content = getattr(message, 'content', '')
+                if content:
+                    yield sse_content(content)
+
+            elif is_tool_message:
+                # 发送工具调用事件
+                tool_name = getattr(message, 'name', 'unknown_tool')
+                tool_content = message.content if hasattr(message, 'content') else ""
+                logger.info(f"  🔧 工具结果: {tool_name} → {tool_content[:200]}")
+                if len(tool_content) > 1000:
+                    tool_content = tool_content[:1000] + "...(已截断)"
+                tool_event = json.dumps({
+                    "type": "tool_call",
+                    "tool_name": tool_name,
+                    "output": tool_content,
+                    "status": "completed"
+                }, ensure_ascii=False)
+                yield sse_event("tool_call", tool_event)
 
         elif mode == "updates":
-            # updates 模式：检测 interrupt / 节点完成
-            if isinstance(payload, dict) and INTERRUPT_KEY not in payload:
-                node_name = next(iter(payload), None)
-                if node_name and node_name not in ("__interrupt__",):
-                    logger.debug(f"  ▶ 节点完成: {node_name}")
-            if isinstance(payload, dict) and INTERRUPT_KEY in payload:
-                interrupts = payload[INTERRUPT_KEY]
+            # 处理interrupt事件（审批请求）
+            from datetime import datetime, timezone
+
+            if isinstance(payload, dict) and "__interrupt__" in payload:
+                interrupts = payload["__interrupt__"]
                 logger.info(f"  🛑 检测到 interrupt，共 {len(interrupts)} 个待审批操作")
 
-                # 提取 HITLRequest 中的 action 信息
+                # 提取action信息
                 actions = []
                 for intr in interrupts:
                     value = intr.value if hasattr(intr, 'value') else intr
@@ -328,14 +335,14 @@ async def _process_stream(orchestrator, astream_input, config, user_id: str, ses
                                 "description": action_req.get("description", ""),
                             })
 
-                # 所有 interrupt 统一发送审批事件，交由用户决定
+                # 发送审批事件
                 interrupted = True
                 approval_event = json.dumps({
                     "type": "approval_request",
                     "actions": actions,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 }, ensure_ascii=False)
-                yield f"\n__EVENT__:{approval_event}\n"
+                yield sse_event("approval", approval_event)
                 logger.info(f"  📋 审批事件: {[a['name'] for a in actions]}")
 
     if not interrupted:
@@ -385,7 +392,7 @@ async def _process_stream(orchestrator, astream_input, config, user_id: str, ses
 
         logger.info(f"🟢 完成: agent={detected_agent}, tools={metadata.get('tool_calls', 0)}, duration={metadata.get('duration', 0):.1f}s")
 
-        yield f"\n__METADATA__:{json.dumps(metadata)}"
+        yield sse_event("metadata", json.dumps(metadata))
     else:
         logger.info("⏸️ 流暂停，等待用户审批")
 

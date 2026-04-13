@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, triggerRef } from 'vue'
 import {
   sendMessage,
   sendMessageStream,
@@ -12,7 +12,8 @@ import {
   deleteSession as deleteSessionApi,
   type AgentMetadata,
   type ToolCallDetail,
-  type ChatSession
+  type ChatSession,
+  type SSEEvent
 } from '@/api/chat'
 
 export interface ApprovalAction {
@@ -44,6 +45,71 @@ export interface Demo {
   description: string
   category: string
   coming_soon?: boolean
+}
+
+/**
+ * 打字机动画控制器
+ * 使用 requestAnimationFrame 逐步显示流式文本，实现逐字渲染效果。
+ */
+function createTypingAnimator(onContentChange?: () => void) {
+  let fullContent = ''
+  let displayedIdx = 0
+  let rafId: number | null = null
+  let targetMsg: Message | null = null
+  let resolveWait: (() => void) | null = null
+  let scrollCb: (() => void) | null = null
+
+  function notifyChange() {
+    if (onContentChange) onContentChange()
+    if (scrollCb) scrollCb()
+  }
+
+  function animate() {
+    if (!targetMsg) return
+    const pending = fullContent.length - displayedIdx
+    if (pending <= 0) {
+      rafId = null
+      if (resolveWait) { resolveWait(); resolveWait = null }
+      return
+    }
+    // 动态速度：始终逐字或小幅追赶，确保视觉效果可见
+    // 积压少时逐字，积压多时每帧最多 3 字符
+    const step = Math.min(3, Math.max(1, Math.ceil(pending / 60)))
+    displayedIdx = Math.min(displayedIdx + step, fullContent.length)
+    targetMsg.content = fullContent.substring(0, displayedIdx)
+    notifyChange()
+    rafId = requestAnimationFrame(animate)
+  }
+
+  return {
+    /** 更新目标内容，启动/继续动画 */
+    update(msg: Message, content: string) {
+      targetMsg = msg
+      fullContent = content
+      if (!rafId) rafId = requestAnimationFrame(animate)
+    },
+    /** 立即显示全部内容，停止动画 */
+    flush() {
+      if (rafId) { cancelAnimationFrame(rafId); rafId = null }
+      if (targetMsg) { targetMsg.content = fullContent; displayedIdx = fullContent.length }
+      if (resolveWait) { resolveWait(); resolveWait = null }
+      notifyChange()
+    },
+    /** flush + 重置所有状态（用于消息切换） */
+    reset() {
+      this.flush()
+      fullContent = ''
+      displayedIdx = 0
+      targetMsg = null
+    },
+    /** 等待动画追赶完成 */
+    waitComplete(): Promise<void> {
+      if (displayedIdx >= fullContent.length) return Promise.resolve()
+      return new Promise(resolve => { resolveWait = resolve })
+    },
+    /** 注册滚动回调 */
+    onScroll(cb: () => void) { scrollCb = cb },
+  }
 }
 
 export const useChatStore = defineStore('chat', () => {
@@ -80,6 +146,13 @@ export const useChatStore = defineStore('chat', () => {
   const currentDemo = ref<string>('deepagents')
   const demos = ref<Demo[]>([])
   const isLoading = ref(false)
+
+  // 打字机动画控制器（每帧 triggerRef 强制 Vue 检测到原始对象的 content 变更）
+  const typingAnimator = createTypingAnimator(() => triggerRef(demoMessages))
+
+  function registerScrollCallback(cb: () => void) {
+    typingAnimator.onScroll(cb)
+  }
 
   // 监听 sessionId 变化，自动持久化到 localStorage
   watch(sessionId, (newId) => {
@@ -180,43 +253,61 @@ export const useChatStore = defineStore('chat', () => {
     const ensureAssistantMsg = () => {
       if (!currentAssistantMsg) {
         assistantMsgCount++
-        currentAssistantMsg = {
+        console.log('[ChatStore] 创建新的助手消息, count:', assistantMsgCount)
+        currentMessages.push({
           id: `assistant-${Date.now()}-${assistantMsgCount}`,
           role: 'assistant',
           content: '',
           timestamp: Date.now(),
-        }
-        currentMessages.push(currentAssistantMsg)
+        })
+        // 从响应式数组读回 Proxy 包装的对象，后续修改 .content 才能触发 Vue 响应式
+        currentAssistantMsg = currentMessages[currentMessages.length - 1]
+        console.log('[ChatStore] 消息列表长度:', currentMessages.length)
       }
     }
 
     try {
       await sendMessageStream(
         userMessage,
-        (chunk) => {
-          // 调试：打印每个 chunk
-          console.log('[ChatStore] chunk:', JSON.stringify(chunk).substring(0, 300))
-
-          // 按行分割处理
-          const lines = chunk.split('\n')
-
-          for (let i = 0; i < lines.length; i++) {
-            const line = lines[i]
-
-            // 检查是否是事件行
-            if (line.startsWith('__EVENT__:')) {
-              console.log('[ChatStore] 解析事件行:', line.substring(0, 200))
+        (event: SSEEvent) => {
+          console.log('[ChatStore] 收到SSE事件:', event)
+          switch (event.event) {
+            case 'message': {
+              // 普通文本 token
+              console.log('[ChatStore] message事件, 累积内容:', event.data)
+              currentContent += event.data
+              ensureAssistantMsg()
+              console.log('[ChatStore] 当前消息:', currentAssistantMsg)
+              typingAnimator.update(currentAssistantMsg!, currentContent)
+              break
+            }
+            case 'tool_call': {
+              // 工具调用：立即显示当前内容，创建工具消息
+              typingAnimator.reset()
+              if (currentAssistantMsg) {
+                currentAssistantMsg.content = currentContent.trim()
+                currentAssistantMsg = null
+                currentContent = ''
+              }
               try {
-                const eventData = JSON.parse(line.substring('__EVENT__:'.length))
-                if (eventData.type === 'tool_call') {
-                  // 工具调用时，结束当前助手消息
-                  if (currentAssistantMsg) {
-                    currentAssistantMsg.content = currentContent.trim()
-                    currentAssistantMsg = null
-                    currentContent = ''
-                  }
+                const eventData = JSON.parse(event.data)
 
-                  // 创建工具消息
+                // 如果tool调用来自sub-agent（coder-agent/sre-agent），将内容作为assistant消息显示
+                const isSubAgent = eventData.tool_name === 'coder-agent' || eventData.tool_name === 'sre-agent'
+
+                if (isSubAgent && eventData.output) {
+                  // Sub-agent响应作为assistant消息
+                  assistantMsgCount++
+                  const assistantMsg: Message = {
+                    id: `assistant-${Date.now()}-${assistantMsgCount}`,
+                    role: 'assistant',
+                    content: eventData.output,
+                    timestamp: Date.now(),
+                  }
+                  currentMessages.push(assistantMsg)
+                  console.log(`[ChatStore] Sub-agent响应作为assistant消息: ${eventData.tool_name}`)
+                } else {
+                  // 普通工具调用，显示为工具消息
                   const toolMsg: Message = {
                     id: `tool-${Date.now()}-${assistantMsgCount}`,
                     role: 'tool',
@@ -230,55 +321,66 @@ export const useChatStore = defineStore('chat', () => {
                   currentMessages.push(toolMsg)
                   console.log(`[ChatStore] 收到工具事件: ${eventData.tool_name}`)
                 }
-                else if (eventData.type === 'approval_request') {
-                  // 审批请求，结束当前助手消息
-                  if (currentAssistantMsg) {
-                    currentAssistantMsg.content = currentContent.trim()
-                    currentAssistantMsg = null
-                    currentContent = ''
-                  }
-
-                  // 创建审批消息
-                  const approvalMsg: Message = {
-                    id: `approval-${Date.now()}`,
-                    role: 'approval',
-                    content: eventData.actions.map((a: any) =>
-                      `${a.name}: ${JSON.stringify(a.args)}`
-                    ).join('\n'),
-                    timestamp: Date.now(),
-                    approvalInfo: {
-                      actions: eventData.actions,
-                      timestamp: eventData.timestamp,
-                      status: 'pending',
-                    }
-                  }
-                  currentMessages.push(approvalMsg)
-                  console.log(`[ChatStore] 收到审批事件: ${eventData.actions.map((a: any) => a.name)}`)
-                }
               } catch (e) {
-                console.error('Failed to parse event:', e, line)
+                console.error('Failed to parse tool_call event:', e)
               }
+              break
             }
-            // 检查是否是元数据行
-            else if (line.startsWith('__METADATA__:')) {
+            case 'approval': {
+              // 审批请求：立即显示当前内容，创建审批消息
+              typingAnimator.reset()
+              if (currentAssistantMsg) {
+                currentAssistantMsg.content = currentContent.trim()
+                currentAssistantMsg = null
+                currentContent = ''
+              }
               try {
-                streamedMetadata = JSON.parse(line.substring('__METADATA__:'.length))
+                const eventData = JSON.parse(event.data)
+                const approvalMsg: Message = {
+                  id: `approval-${Date.now()}`,
+                  role: 'approval',
+                  content: eventData.actions.map((a: any) =>
+                    `${a.name}: ${JSON.stringify(a.args)}`
+                  ).join('\n'),
+                  timestamp: Date.now(),
+                  approvalInfo: {
+                    actions: eventData.actions,
+                    timestamp: eventData.timestamp,
+                    status: 'pending',
+                  }
+                }
+                currentMessages.push(approvalMsg)
+                console.log(`[ChatStore] 收到审批事件: ${eventData.actions.map((a: any) => a.name)}`)
+              } catch (e) {
+                console.error('Failed to parse approval event:', e)
+              }
+              break
+            }
+            case 'metadata': {
+              try {
+                streamedMetadata = JSON.parse(event.data)
                 if (currentAssistantMsg) {
                   currentAssistantMsg.agentMetadata = streamedMetadata
                 }
               } catch (e) {
                 console.error('Failed to parse metadata:', e)
               }
+              break
             }
-            // 普通内容：直接拼接（不额外加换行，保留原始 markdown 格式）
-            else {
-              // 非最后一段补回 split 丢失的换行
-              const segment = (i < lines.length - 1) ? line + '\n' : line
-              // 跳过纯空白段（避免创建空助手消息）
-              if (!segment.trim() && !currentContent) continue
-              currentContent += segment
-              ensureAssistantMsg()
-              currentAssistantMsg!.content = currentContent
+            case 'error': {
+              typingAnimator.flush()
+              const errorContent = `错误: ${event.data}`
+              if (currentAssistantMsg) {
+                currentAssistantMsg.content = errorContent
+              } else {
+                currentMessages.push({
+                  id: `assistant-${Date.now()}-error`,
+                  role: 'assistant',
+                  content: errorContent,
+                  timestamp: Date.now(),
+                })
+              }
+              break
             }
           }
         },
@@ -287,20 +389,30 @@ export const useChatStore = defineStore('chat', () => {
         userId.value
       )
 
-      // 流式结束后，确保最后的内容已更新
+      // 等待打字机动画完成
       if (currentAssistantMsg) {
+        await typingAnimator.waitComplete()
         currentAssistantMsg.content = currentContent.trim()
         if (streamedMetadata) {
           currentAssistantMsg.agentMetadata = streamedMetadata
         }
-        // 清理空内容的助手消息
+        // 清理空内容的助手消息（仅当没有工具调用时）
+        // 如果有工具调用但文本为空，保留消息并显示占位符
         if (!currentAssistantMsg.content) {
-          const idx = currentMessages.indexOf(currentAssistantMsg)
-          if (idx !== -1) currentMessages.splice(idx, 1)
+          const hasToolCalls = currentMessages.some(m => m.role === 'tool' || m.role === 'approval')
+          if (hasToolCalls) {
+            // 有工具调用但没有文本，显示占位符
+            currentAssistantMsg.content = '已执行操作'
+          } else {
+            // 既没有工具调用也没有文本，删除消息
+            const idx = currentMessages.indexOf(currentAssistantMsg)
+            if (idx !== -1) currentMessages.splice(idx, 1)
+          }
         }
       }
 
     } catch (error) {
+      typingAnimator.flush()
       const errorMsg = `错误: ${error instanceof Error ? error.message : '未知错误'}`
       if (currentAssistantMsg) {
         currentAssistantMsg.content = errorMsg
@@ -352,6 +464,7 @@ export const useChatStore = defineStore('chat', () => {
       return false
     }
 
+    typingAnimator.flush()
     // 切换 demo（历史会自动切换，因为 messages 是计算属性）
     currentDemo.value = demoId
     return true
@@ -378,13 +491,13 @@ export const useChatStore = defineStore('chat', () => {
     const ensureAssistantMsg = () => {
       if (!currentAssistantMsg) {
         assistantMsgCount++
-        currentAssistantMsg = {
+        currentMessages.push({
           id: `assistant-${Date.now()}-${assistantMsgCount}`,
           role: 'assistant',
           content: '',
           timestamp: Date.now(),
-        }
-        currentMessages.push(currentAssistantMsg)
+        })
+        currentAssistantMsg = currentMessages[currentMessages.length - 1]
       }
     }
 
@@ -396,18 +509,39 @@ export const useChatStore = defineStore('chat', () => {
     try {
       await sendApprovalStream(
         decisions,
-        (chunk) => {
-          const lines = chunk.split('\n')
-          for (const line of lines) {
-            if (line.startsWith('__EVENT__:')) {
+        (event: SSEEvent) => {
+          switch (event.event) {
+            case 'message': {
+              currentContent += event.data
+              ensureAssistantMsg()
+              typingAnimator.update(currentAssistantMsg!, currentContent)
+              break
+            }
+            case 'tool_call': {
+              typingAnimator.reset()
+              if (currentAssistantMsg) {
+                currentAssistantMsg.content = currentContent.trim()
+                currentAssistantMsg = null
+                currentContent = ''
+              }
               try {
-                const eventData = JSON.parse(line.substring('__EVENT__:'.length))
-                if (eventData.type === 'tool_call') {
-                  if (currentAssistantMsg) {
-                    currentAssistantMsg.content = currentContent.trim()
-                    currentAssistantMsg = null
-                    currentContent = ''
+                const eventData = JSON.parse(event.data)
+
+                // 如果tool调用来自sub-agent，将内容作为assistant消息显示
+                const isSubAgent = eventData.tool_name === 'coder-agent' || eventData.tool_name === 'sre-agent'
+
+                if (isSubAgent && eventData.output) {
+                  // Sub-agent响应作为assistant消息
+                  assistantMsgCount++
+                  const assistantMsg: Message = {
+                    id: `assistant-${Date.now()}-${assistantMsgCount}`,
+                    role: 'assistant',
+                    content: eventData.output,
+                    timestamp: Date.now(),
                   }
+                  currentMessages.push(assistantMsg)
+                } else {
+                  // 普通工具调用，显示为工具消息
                   const toolMsg: Message = {
                     id: `tool-${Date.now()}-${assistantMsgCount}`,
                     role: 'tool',
@@ -417,45 +551,64 @@ export const useChatStore = defineStore('chat', () => {
                   }
                   currentMessages.push(toolMsg)
                 }
-                else if (eventData.type === 'approval_request') {
-                  if (currentAssistantMsg) {
-                    currentAssistantMsg.content = currentContent.trim()
-                    currentAssistantMsg = null
-                    currentContent = ''
-                  }
-                  const newApprovalMsg: Message = {
-                    id: `approval-${Date.now()}`,
-                    role: 'approval',
-                    content: eventData.actions.map((a: any) =>
-                      `${a.name}: ${JSON.stringify(a.args)}`
-                    ).join('\n'),
-                    timestamp: Date.now(),
-                    approvalInfo: {
-                      actions: eventData.actions,
-                      timestamp: eventData.timestamp,
-                      status: 'pending',
-                    }
-                  }
-                  currentMessages.push(newApprovalMsg)
-                }
               } catch (e) {
-                console.error('Failed to parse event:', e)
+                console.error('Failed to parse tool_call event:', e)
               }
+              break
             }
-            else if (line.startsWith('__METADATA__:')) {
+            case 'approval': {
+              typingAnimator.reset()
+              if (currentAssistantMsg) {
+                currentAssistantMsg.content = currentContent.trim()
+                currentAssistantMsg = null
+                currentContent = ''
+              }
               try {
-                streamedMetadata = JSON.parse(line.substring('__METADATA__:'.length))
+                const eventData = JSON.parse(event.data)
+                const newApprovalMsg: Message = {
+                  id: `approval-${Date.now()}`,
+                  role: 'approval',
+                  content: eventData.actions.map((a: any) =>
+                    `${a.name}: ${JSON.stringify(a.args)}`
+                  ).join('\n'),
+                  timestamp: Date.now(),
+                  approvalInfo: {
+                    actions: eventData.actions,
+                    timestamp: eventData.timestamp,
+                    status: 'pending',
+                  }
+                }
+                currentMessages.push(newApprovalMsg)
+              } catch (e) {
+                console.error('Failed to parse approval event:', e)
+              }
+              break
+            }
+            case 'metadata': {
+              try {
+                streamedMetadata = JSON.parse(event.data)
                 if (currentAssistantMsg) {
                   currentAssistantMsg.agentMetadata = streamedMetadata
                 }
               } catch (e) {
                 console.error('Failed to parse metadata:', e)
               }
+              break
             }
-            else if (line) {
-              currentContent += (currentContent ? '\n' : '') + line
-              ensureAssistantMsg()
-              currentAssistantMsg!.content = currentContent
+            case 'error': {
+              typingAnimator.flush()
+              const errorContent = `错误: ${event.data}`
+              if (currentAssistantMsg) {
+                currentAssistantMsg.content = errorContent
+              } else {
+                currentMessages.push({
+                  id: `assistant-${Date.now()}-error`,
+                  role: 'assistant',
+                  content: errorContent,
+                  timestamp: Date.now(),
+                })
+              }
+              break
             }
           }
         },
@@ -465,12 +618,27 @@ export const useChatStore = defineStore('chat', () => {
       )
 
       if (currentAssistantMsg) {
+        await typingAnimator.waitComplete()
         currentAssistantMsg.content = currentContent.trim()
         if (streamedMetadata) {
           currentAssistantMsg.agentMetadata = streamedMetadata
         }
+        // 清理空内容的助手消息（仅当没有工具调用时）
+        // 如果有工具调用但文本为空，保留消息并显示占位符
+        if (!currentAssistantMsg.content) {
+          const hasToolCalls = currentMessages.some(m => m.role === 'tool' || m.role === 'approval')
+          if (hasToolCalls) {
+            // 有工具调用但没有文本，显示占位符
+            currentAssistantMsg.content = '已执行操作'
+          } else {
+            // 既没有工具调用也没有文本，删除消息
+            const idx = currentMessages.indexOf(currentAssistantMsg)
+            if (idx !== -1) currentMessages.splice(idx, 1)
+          }
+        }
       }
     } catch (error) {
+      typingAnimator.flush()
       const errorMsg = `错误: ${error instanceof Error ? error.message : '未知错误'}`
       currentMessages.push({
         id: `assistant-${Date.now()}-error`,
@@ -498,6 +666,7 @@ export const useChatStore = defineStore('chat', () => {
   function switchSession(targetSessionId: string) {
     if (targetSessionId === sessionId.value) return
 
+    typingAnimator.flush()
     sessionId.value = targetSessionId
     // 清空当前消息，由 loadHistory 重新加载
     demoMessages.value.set(currentDemo.value, [])
@@ -552,5 +721,6 @@ export const useChatStore = defineStore('chat', () => {
     switchSession,
     startNewChat,
     deleteSession,
+    registerScrollCallback,
   }
 })

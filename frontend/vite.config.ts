@@ -19,7 +19,8 @@ export default defineConfig({
         configure: (proxy) => {
           proxy.on('proxyRes', (proxyRes) => {
             // 如果后端标记为流式响应，禁用缓冲
-            if (proxyRes.headers['content-type']?.includes('text/plain')) {
+            const contentType = proxyRes.headers['content-type'] || ''
+            if (contentType.includes('text/plain') || contentType.includes('text/event-stream') || contentType.includes('application/stream')) {
               proxyRes.headers['X-Accel-Buffering'] = 'no'
               proxyRes.headers['Cache-Control'] = 'no-cache'
             }

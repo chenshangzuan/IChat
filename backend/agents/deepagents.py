@@ -166,7 +166,7 @@ def create_orchestrator(checkpointer=None, store=None):
 2. **选择文件名** - 用户指定则用用户的，否则用默认名称
 3. **调用 write_file** - 只调用**一次**
 4. **成功后立即回复用户** - 不要再调用 write_file
-5. **仅当返回 "already exists" 时** → 追加时间戳后缀重试**一次**，然后回复
+5. **仅当返回 "already exists" 时** → 追加自增序号后缀重试**一次**，然后回复
 
 **严禁：**
 - **严禁** write_file 成功后对同一文件再次调用 write_file

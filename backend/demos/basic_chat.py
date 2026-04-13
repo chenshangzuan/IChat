@@ -84,11 +84,13 @@ async def chat_stream(user_input: str, session_id: str = "default") -> AsyncIter
     messages = history + [HumanMessage(content=user_input)]
 
     # 流式调用
+    from common.sse import sse_content
+
     async for chunk in default_llm.astream(messages):
         if hasattr(chunk, 'content'):
-            yield chunk.content
+            yield sse_content(chunk.content)
         else:
-            yield str(chunk)
+            yield sse_content(str(chunk))
 
     # 保存完整响应到历史（这里简化处理）
     # 实际应用中需要收集完整响应后再保存

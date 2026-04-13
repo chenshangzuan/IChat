@@ -656,6 +656,16 @@ function scrollToBottom() {
 onMounted(() => {
   chatStore.loadDemos()
   chatStore.loadSessionList()
+
+  // 打字机动画期间自动滚动（仅在用户已在底部附近时触发）
+  chatStore.registerScrollCallback(() => {
+    const el = messagesContainer.value
+    if (!el) return
+    const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 150
+    if (isNearBottom) {
+      el.scrollTop = el.scrollHeight
+    }
+  })
 })
 </script>
 

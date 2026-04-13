@@ -13,6 +13,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from common.config import config
+from common.sse import sse_event
 from demos import basic_chat, deepagents_demo
 
 # 配置日志
@@ -265,27 +266,26 @@ async def chat_stream_endpoint(request: ChatRequest):
                     session_id=request.session_id,
                     user_id=request.user_id
                 ):
-                    if '__EVENT__' in chunk:
-                        logger.info(f"  ➡️ [main] yield EVENT chunk: {chunk[:150]}...")
                     yield chunk
 
             else:
                 # 未知的 demo_id
-                yield f"错误: 未知的 demo_id: {request.demo_id}. 可用选项: basic-chat, deepagents"
+                yield sse_event("error", f"未知的 demo_id: {request.demo_id}. 可用选项: basic-chat, deepagents")
                 return
 
             logger.info(f"✅ 流式聊天响应完成: session={request.session_id}")
 
         except Exception as e:
             logger.error(f"❌ 流式聊天处理失败: {e}")
-            yield f"\n[错误: {str(e)}]"
+            yield sse_event("error", str(e))
 
     return StreamingResponse(
         generate(),
-        media_type="text/plain",
+        media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
         }
     )
 
@@ -316,14 +316,15 @@ async def chat_approve_endpoint(request: ApprovalRequest):
             import traceback
             logger.error(f"❌ 审批恢复处理失败: {type(e).__name__}: {e}")
             logger.error(traceback.format_exc())
-            yield f"\n[错误: {str(e)}]"
+            yield sse_event("error", str(e))
 
     return StreamingResponse(
         generate(),
-        media_type="text/plain",
+        media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
         }
     )
 

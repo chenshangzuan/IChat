@@ -2,6 +2,9 @@
  * 聊天 API
  */
 import axios from 'axios'
+import { createSSEParser, type SSEEvent } from '@/utils/sseParser'
+
+export type { SSEEvent } from '@/utils/sseParser'
 
 const api = axios.create({
   baseURL: '/api',
@@ -64,11 +67,11 @@ export async function sendMessage(
 }
 
 /**
- * 发送聊天消息（流式）
+ * 发送聊天消息（流式 SSE）
  */
 export async function sendMessageStream(
   message: string,
-  onChunk: (chunk: string) => void,
+  onEvent: (event: SSEEvent) => void,
   sessionId = 'default',
   demoId = 'basic-chat',
   userId = ''
@@ -97,21 +100,22 @@ export async function sendMessageStream(
     throw new Error('No response body')
   }
 
+  const parser = createSSEParser(onEvent)
+
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
 
-    const chunk = decoder.decode(value, { stream: true })
-    onChunk(chunk)
+    parser.feed(decoder.decode(value, { stream: true }))
   }
 }
 
 /**
- * 发送审批决策（流式）
+ * 发送审批决策（流式 SSE）
  */
 export async function sendApprovalStream(
   decisions: Array<{ type: string; message?: string }>,
-  onChunk: (chunk: string) => void,
+  onEvent: (event: SSEEvent) => void,
   sessionId = 'default',
   demoId = 'deepagents',
   userId = ''
@@ -140,12 +144,13 @@ export async function sendApprovalStream(
     throw new Error('No response body')
   }
 
+  const parser = createSSEParser(onEvent)
+
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
 
-    const chunk = decoder.decode(value, { stream: true })
-    onChunk(chunk)
+    parser.feed(decoder.decode(value, { stream: true }))
   }
 }
 
