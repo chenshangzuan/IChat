@@ -21,6 +21,12 @@ class Config:
     LANGSMITH_PROJECT: str = os.getenv("LANGSMITH_PROJECT", "langchain-learning")
     LANGSMITH_API_KEY: str = os.getenv("LANGSMITH_API_KEY", "")
 
+    # Langfuse 配置
+    LANGFUSE_TRACING: bool = os.getenv("LANGFUSE_TRACING", "false").lower() == "true"
+    LANGFUSE_PUBLIC_KEY: str = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+    LANGFUSE_SECRET_KEY: str = os.getenv("LANGFUSE_SECRET_KEY", "")
+    LANGFUSE_HOST: str = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
+
     # 应用配置
     APP_NAME: str = "IChat"
     APP_VERSION: str = "0.1.0"

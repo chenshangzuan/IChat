@@ -9,6 +9,8 @@ from langgraph.checkpoint.memory import MemorySaver
 import pathlib
 import logging
 
+from common.langfuse import get_langfuse_handler
+
 logger = logging.getLogger(__name__)
 
 
@@ -84,7 +86,17 @@ class SessionManager:
             LangGraph 配置字典，包含 thread_id
         """
         thread_id = f"{demo_id}:{session_id}"
-        return {"configurable": {"thread_id": thread_id}}
+        # 构建基础配置
+        config_dict = {
+            "configurable": {"thread_id": thread_id},
+        }
+
+        # Langfuse追踪
+        handler = get_langfuse_handler()
+        if handler:
+            config_dict["callbacks"] = [handler]  # callbacks必须是列表
+            logger.debug(f"🔑 [SessionManager] Langfuse callback 已添加")
+        return config_dict
 
     async def get_config(self, session_id: str, demo_id: str) -> dict:
         """
@@ -95,15 +107,24 @@ class SessionManager:
             demo_id: Demo ID
 
         Returns:
-            LangGraph 配置字典，包含 thread_id 和 recursion_limit
+            LangGraph 配置字典，包含 thread_id 和 callbacks
         """
         # 确保 checkpointer 已初始化
         await self._ensure_checkpointer()
         thread_id = f"{demo_id}:{session_id}"
-        return {
+
+        # 构建基础配置
+        config_dict = {
             "configurable": {"thread_id": thread_id},
             "recursion_limit": 15  # 限制工具调用循环次数，防止无限循环和重复调用
         }
+
+        # Langfuse追踪
+        handler = get_langfuse_handler()
+        if handler:
+            config_dict["callbacks"] = [handler]  # callbacks必须是列表
+            logger.debug(f"🔑 [SessionManager] Langfuse callback 已添加")
+        return config_dict
 
     async def clear_session(self, session_id: str, demo_id: str):
         """

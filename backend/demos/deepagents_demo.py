@@ -11,6 +11,7 @@ import sys
 import asyncio
 import json
 
+from common.langfuse import langfuse_handler
 from common.sse import sse_content, sse_event
 
 from agents import get_orchestrator_with_store

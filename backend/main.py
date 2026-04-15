@@ -97,6 +97,7 @@ async def lifespan(app: FastAPI):
     logger.info("✅ FastAPI 服务器已启动")
     logger.info(f"📝 环境: {'开发' if config.DEBUG else '生产'}")
     logger.info(f"🔑 LangSmith 追踪: {'启用' if config.LANGSMITH_TRACING else '禁用'}")
+    logger.info(f"🔑 Langfuse 追踪: {'启用' if config.LANGFUSE_TRACING else '禁用'}")
 
     yield
 
