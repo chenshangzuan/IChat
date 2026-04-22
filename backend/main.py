@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from common.config import config
-from api import system, demos, chat
+from api import system, demos, chat, wechat_work
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,6 +48,7 @@ app.add_middleware(
 app.include_router(system.router)
 app.include_router(demos.router)
 app.include_router(chat.router)
+app.include_router(wechat_work.router)
 
 
 if __name__ == "__main__":
