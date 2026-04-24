@@ -14,9 +14,15 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 
 
-def verify_signature(token: str, timestamp: str, nonce: str, signature: str) -> bool:
-    """校验企业微信回调签名（SHA1）"""
-    parts = sorted([token, timestamp, nonce])
+def verify_signature(token: str, timestamp: str, nonce: str, signature: str, msg_encrypt: str = "") -> bool:
+    """
+    校验企业微信回调签名（SHA1）
+
+    安全模式签名公式（4 参数）：SHA1(sort(token, timestamp, nonce, msg_encrypt))
+    - GET 验证：msg_encrypt = echostr（加密后的值）
+    - POST 消息：msg_encrypt = XML 中的 Encrypt 字段
+    """
+    parts = sorted([token, timestamp, nonce, msg_encrypt])
     digest = hashlib.sha1("".join(parts).encode()).hexdigest()
     return digest == signature
 
