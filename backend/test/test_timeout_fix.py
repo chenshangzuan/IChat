@@ -19,14 +19,14 @@ logging.basicConfig(
 
 async def test():
     """测试修复效果"""
-    from demos.deepagents_demo import chat_response_with_metadata
+    from demos.deepagents_chat import chat_response
 
     print("\n" + "=" * 60)
     print("🧪 测试: 复杂任务（快速排序）")
     print("=" * 60)
 
     try:
-        result = await chat_response_with_metadata(
+        result = await chat_response(
             user_input="请帮我写一个快速排序算法",
             session_id="test-timeout"
         )

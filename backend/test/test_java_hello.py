@@ -20,13 +20,13 @@ logger = logging.getLogger(__name__)
 
 async def test_java_hello():
     """测试 Java Hello World 生成"""
-    from demos.deepagents_demo import chat_response_with_metadata
+    from demos.deepagents_chat import chat_response
 
     print("\n" + "=" * 60)
     print("🧪 测试: 用 Java 写一个 Hello World")
     print("=" * 60)
 
-    result = await chat_response_with_metadata(
+    result = await chat_response(
         user_input="用java 写一个hello world",
         session_id="test-java-hello"
     )

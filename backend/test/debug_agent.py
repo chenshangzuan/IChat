@@ -6,10 +6,10 @@ import asyncio
 
 async def debug_test():
     """调试测试"""
-    from demos.deepagents_demo import chat_response_with_metadata
-    from demos.deepagents_demo import detect_agent
+    from demos.deepagents_chat import chat_response
+    from demos.deepagents_chat import detect_agent
 
-    result = await chat_response_with_metadata(
+    result = await chat_response(
         user_input="用java写一个hello world",
         session_id="debug-test"
     )

@@ -1,8 +1,8 @@
 import asyncio
-from demos.deepagents_demo import chat_response_with_metadata
+from demos.deepagents_chat import chat_response
 
 async def test():
-    result = await chat_response_with_metadata("帮我写一个java的冒泡排序", "test-check")
+    result = await chat_response("帮我写一个java的冒泡排序", "test-check")
     response = result["response"]
 
     print(f"响应长度: {len(response)}")

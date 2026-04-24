@@ -12,7 +12,7 @@ from api.schemas import (
     EditMessageRequest,
 )
 from common.sse import sse_event
-from demos import basic_chat, deepagents_demo
+from demos import basic_chat, deepagents_chat
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ async def chat(request: ChatRequest):
             return ChatResponse(response=response_text, session_id=request.session_id)
 
         elif request.demo_id == "deepagents":
-            result = await deepagents_demo.chat_response_with_metadata(
+            result = await deepagents_chat.chat_response(
                 user_input=request.message,
                 session_id=request.session_id,
                 user_id=request.user_id,
@@ -75,7 +75,7 @@ async def chat_stream(request: ChatRequest):
                     yield chunk
 
             elif request.demo_id == "deepagents":
-                async for chunk in deepagents_demo.chat_stream_with_metadata(
+                async for chunk in deepagents_chat.chat_stream_with_metadata(
                     user_input=request.message,
                     session_id=request.session_id,
                     user_id=request.user_id,
@@ -105,7 +105,7 @@ async def chat_approve(request: ApprovalRequest):
         try:
             logger.info(f"📨 收到审批请求: session={request.session_id}, decisions={[d.type for d in request.decisions]}")
             decisions = [{"type": d.type, "message": d.message} for d in request.decisions]
-            async for chunk in deepagents_demo.chat_approve_stream(
+            async for chunk in deepagents_chat.chat_approve_stream(
                 session_id=request.session_id,
                 user_id=request.user_id,
                 decisions=decisions,
@@ -133,7 +133,7 @@ async def clear_chat_history(request: ChatRequest):
         if request.demo_id == "basic-chat":
             basic_chat.clear_history(request.session_id)
         elif request.demo_id == "deepagents":
-            await deepagents_demo.clear_history(request.session_id)
+            await deepagents_chat.clear_history(request.session_id)
         else:
             raise HTTPException(status_code=400, detail=f"未知的 demo_id: {request.demo_id}. 可用选项: basic-chat, deepagents")
 
@@ -359,7 +359,7 @@ async def delete_session(session_id: str, demo_id: str = "deepagents"):
         if demo_id == "basic-chat":
             basic_chat.clear_history(session_id)
         elif demo_id == "deepagents":
-            await deepagents_demo.clear_history(session_id)
+            await deepagents_chat.clear_history(session_id)
         else:
             raise HTTPException(status_code=400, detail=f"未知的 demo_id: {demo_id}. 可用选项: basic-chat, deepagents")
 

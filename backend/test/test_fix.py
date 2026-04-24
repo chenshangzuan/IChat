@@ -2,13 +2,13 @@
 快速测试修复后的效果
 """
 import asyncio
-from demos.deepagents_demo import chat_response_with_metadata
+from demos.deepagents_chat import chat_response
 
 async def test():
     print("测试: 帮我写一个java的冒泡排序")
     print("=" * 60)
 
-    result = await chat_response_with_metadata(
+    result = await chat_response(
         user_input='帮我写一个java的冒泡排序',
         session_id='final-test'
     )

@@ -9,14 +9,14 @@ import asyncio
 
 async def compare():
     """比较测试"""
-    from demos.deepagents_demo import chat_response_with_metadata
+    from demos.deepagents_chat import chat_response
 
     # 测试 1: Java Hello World
     print("=" * 60)
     print("测试 1: 用java写一个hello world")
     print("=" * 60)
 
-    result1 = await chat_response_with_metadata(
+    result1 = await chat_response(
         user_input="用java写一个hello world",
         session_id="compare-1"
     )
@@ -41,7 +41,7 @@ async def compare():
     print("测试 2: 请帮我写一个快速排序算法（要求详细）")
     print("=" * 60)
 
-    result2 = await chat_response_with_metadata(
+    result2 = await chat_response(
         user_input="请帮我写一个快速排序算法，包含详细注释和测试用例",
         session_id="compare-2"
     )

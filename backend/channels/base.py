@@ -51,7 +51,7 @@ class BaseChannel(ABC):
 
     async def _run_stream(self, session_id: str, user_input: str, recipient: str) -> None:
         """调用 DeepAgent 流，汇总结果后发送给用户"""
-        from demos import deepagents_demo
+        from demos import deepagents_chat
 
         try:
             response_buf = []
@@ -59,7 +59,7 @@ class BaseChannel(ABC):
 
             async def _stream():
                 nonlocal tool_notified
-                async for raw_chunk in deepagents_demo.chat_stream_with_metadata(
+                async for raw_chunk in deepagents_chat.chat_stream_with_metadata(
                     user_input=user_input,
                     session_id=session_id,
                     user_id=recipient,
@@ -131,7 +131,7 @@ class BaseChannel(ABC):
         self, session_id: str, recipient: str, decision: str, reason: str = ""
     ) -> None:
         """执行审批恢复"""
-        from demos import deepagents_demo
+        from demos import deepagents_chat
 
         self._pending_approvals.pop(session_id, None)
 
@@ -140,7 +140,7 @@ class BaseChannel(ABC):
             response_buf = []
 
             async with asyncio.timeout(config.CHANNEL_TIMEOUT):
-                async for chunk in deepagents_demo.chat_approve_stream(
+                async for chunk in deepagents_chat.chat_approve_stream(
                     session_id=session_id,
                     user_id=recipient,
                     decisions=decisions,

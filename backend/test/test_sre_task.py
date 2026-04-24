@@ -15,9 +15,9 @@ logging.basicConfig(
 
 async def test_sre():
     """测试 SRE 任务"""
-    from demos.deepagents_demo import chat_response_with_metadata
+    from demos.deepagents_chat import chat_response
 
-    result = await chat_response_with_metadata(
+    result = await chat_response(
         user_input="如何分析 Nginx 日志中的 502 错误？",
         session_id="test-sre"
     )

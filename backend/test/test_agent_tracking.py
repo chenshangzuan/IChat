@@ -9,7 +9,7 @@
 """
 import asyncio
 import logging
-from demos.deepagents_demo import chat_response_with_metadata
+from demos.deepagents_chat import chat_response
 
 logging.basicConfig(level=logging.INFO)
 
@@ -20,7 +20,7 @@ async def test_agent_tracking():
     print("🧪 测试: Agent 跟踪和日志功能")
     print("=" * 80)
 
-    result = await chat_response_with_metadata(
+    result = await chat_response(
         user_input="请帮我写一个快速排序算法",
         session_id="test-tracking-001"
     )

@@ -3,7 +3,7 @@ import asyncio
 import sys
 sys.path.insert(0, '.')
 
-from demos.deepagents_demo import chat_stream_with_metadata
+from demos.deepagents_chat import chat_stream_with_metadata
 
 async def main():
     print("=== 测试SSE事件类型 ===\n")

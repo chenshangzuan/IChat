@@ -24,13 +24,13 @@ logger = logging.getLogger(__name__)
 
 async def test():
     """简单测试"""
-    from demos.deepagents_demo import chat_response_with_metadata
+    from demos.deepagents_chat import chat_response
 
     print("\n" + "=" * 60)
     print("🧪 Agent 跟踪测试")
     print("=" * 60)
 
-    result = await chat_response_with_metadata(
+    result = await chat_response(
         user_input="1+1等于几？",
         session_id="test-simple"
     )

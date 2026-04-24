@@ -15,9 +15,9 @@ logging.basicConfig(
 
 async def check_response():
     """检查响应内容"""
-    from demos.deepagents_demo import chat_response_with_metadata
+    from demos.deepagents_chat import chat_response
 
-    result = await chat_response_with_metadata(
+    result = await chat_response(
         user_input="用java写一个hello world",
         session_id="check-response"
     )

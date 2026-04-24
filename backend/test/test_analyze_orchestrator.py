@@ -20,14 +20,14 @@ async def analyze_orchestrator():
     print("🔍 分析: Orchestrator 委托行为")
     print("=" * 60)
 
-    from demos.deepagents_demo import chat_response_with_metadata
+    from demos.deepagents_chat import chat_response
 
     user_query = "帮我写一个java的冒泡排序"
 
     print(f"\n📝 用户问题: {user_query}")
     print("-" * 40)
 
-    result = await chat_response_with_metadata(
+    result = await chat_response(
         user_input=user_query,
         session_id="analyze-orchestrator"
     )
