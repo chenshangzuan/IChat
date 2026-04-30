@@ -58,70 +58,136 @@ def extract_tool_calls_detail(messages: list) -> list[dict]:
 
 async def chat_response(user_input: str, session_id: str = "default", user_id: str = "") -> Dict[str, Any]:
     """
-    非流式聊天响应（包含元数据）
-
-    Args:
-        user_input: 用户输入
-        session_id: 会话 ID（用于多轮对话）
+    非流式聊天响应（包含元数据和审批支持）
 
     Returns:
-        包含响应和元数据的字典:
+        正常完成:
         {
-            "response": str,           # 响应文本
-            "agent": str,              # 响应的 agent 类型
-            "all_messages": list,      # 所有消息历史
-            "tracker_summary": dict,   # 跟踪器摘要（委托事件、工具调用等）
+            "interrupted": False,
+            "response": str,
+            "agent_type": str,
+            "delegations": int,
+            "tool_calls": int,
+            "duration": float,
+            "tool_calls_detail": list[dict],
+            # 兼容字段
+            "agent": str,
+            "all_messages": list,
+            "tracker_summary": dict,
+        }
+        审批中断:
+        {
+            "interrupted": True,
+            "actions": list[dict],  # [{name, args, description}]
+            "timestamp": str,
+            "response": "",
+            "agent": "",
+            "tool_calls_detail": [],
+            "delegations": 0,
+            "tool_calls": 0,
+            "duration": float,
         }
     """
-    # 获取会话管理器和 orchestrator
     session_manager = get_session_manager()
     orchestrator = await get_orchestrator_with_store()
 
-    # 创建跟踪器
     tracker = AgentTracker(session_id)
     tracker.log_session_start(user_input)
 
-    # 获取会话配置（包含 thread_id）
+    logger.info(f"🔵 收到请求: session={session_id}, input={user_input[:80]}")
+
     config = await session_manager.get_config(session_id, "deepagents")
 
     from agents.deepagents import AgentContext
-    result = await orchestrator.ainvoke(
-        {"messages": [{"role": "user", "content": user_input}]},
-        config=config,
-        context=AgentContext(user_id=user_id),
-    )
+    from langgraph.errors import GraphInterrupt
 
-    # 使用跟踪器分析消息历史
-    tracker.detect_and_log_tool_calls(result["messages"])
+    interrupted = False
+    interrupt_actions = []
 
-    # 找到来自子代理的完整响应（与 chat_response 相同的逻辑）
-    response = result["messages"][-1].content  # 默认返回最后一条消息
+    try:
+        result = await orchestrator.ainvoke(
+            {"messages": [{"role": "user", "content": user_input}]},
+            config=config,
+            context=AgentContext(user_id=user_id),
+        )
+    except GraphInterrupt:
+        interrupted = True
+        try:
+            state = await orchestrator.aget_state(config)
+            for task in state.tasks:
+                for intr in getattr(task, 'interrupts', []):
+                    value = intr.value if hasattr(intr, 'value') else intr
+                    if isinstance(value, dict):
+                        for action_req in value.get("action_requests", []):
+                            interrupt_actions.append({
+                                "name": action_req.get("name", ""),
+                                "args": action_req.get("args", {}),
+                                "description": action_req.get("description", ""),
+                            })
+        except Exception as e:
+            logger.warning(f"  ⚠️ 读取 interrupt 详情失败: {e}")
+        logger.info(f"  🛑 检测到 interrupt，共 {len(interrupt_actions)} 个待审批操作")
 
-    # 调试：打印所有消息类型
-    logger.info(f"📋 [DEBUG] 总消息数: {len(result['messages'])}")
-    for i, msg in enumerate(result["messages"]):
-        msg_type = getattr(msg, 'type', '')
-        msg_class = type(msg).__name__
-        content_len = len(msg.content) if hasattr(msg, 'content') else 0
-        logger.info(f"📋 [DEBUG] [{i}] {msg_class} (type={msg_type}, {content_len} 字符)")
+    if interrupted:
+        tracker.log_session_complete()
+        from datetime import datetime, timezone
+        return {
+            "interrupted": True,
+            "actions": interrupt_actions,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "response": "",
+            "agent": "",
+            "tool_calls_detail": [],
+            "delegations": 0,
+            "tool_calls": 0,
+            "duration": tracker.get_summary().get("duration", 0.0),
+        }
 
-    for msg in result["messages"]:
-        msg_type = getattr(msg, 'type', '')
-        # 优先返回 tool 类型的消息（子代理的完整响应）
-        if msg_type == 'tool' and hasattr(msg, 'content'):
-            response = msg.content
-            logger.info(f"✅ [DEBUG] 找到 tool 消息，长度: {len(response)}")
-            break
+    # 从 checkpoint 读取当前轮完整消息
+    turn_messages = result["messages"]
+    try:
+        state = await orchestrator.aget_state(config)
+        checkpoint_msgs = state.values.get("messages", [])
+        if checkpoint_msgs:
+            last_human_idx = -1
+            for i, msg in enumerate(checkpoint_msgs):
+                msg_type = getattr(msg, 'type', '') or (msg.get('type', '') if isinstance(msg, dict) else '')
+                if msg_type == 'human':
+                    last_human_idx = i
+            if last_human_idx >= 0:
+                turn_messages = checkpoint_msgs[last_human_idx + 1:]
+    except Exception as e:
+        logger.warning(f"  ⚠️ 读取 checkpoint 消息失败，使用 ainvoke 结果: {e}")
 
-    agent = detect_agent(response)
+    tracker.detect_and_log_tool_calls(turn_messages)
+
+    response = turn_messages[-1].content if turn_messages else ""
+    for msg in reversed(turn_messages):
+        msg_type = getattr(msg, 'type', '') or (msg.get('type', '') if isinstance(msg, dict) else '')
+        if msg_type == 'ai':
+            content = msg.content if hasattr(msg, 'content') else msg.get('content', '') if isinstance(msg, dict) else ''
+            if content and content.strip():
+                response = content
+                break
 
     tracker.log_session_complete()
+    tracker_summary = tracker.get_summary()
+    tool_calls_detail = extract_tool_calls_detail(turn_messages)
+    detected_agent = detect_agent(response)
+
+    logger.info(f"🟢 完成: agent={detected_agent}, tools={tracker_summary.get('tool_call_count', 0)}, duration={tracker_summary.get('duration', 0):.1f}s")
 
     return {
+        "interrupted": False,
         "response": response,
-        "agent": agent,
-        "all_messages": result["messages"],
-        "tracker_summary": tracker.get_summary(),
+        "agent_type": detected_agent,
+        "delegations": tracker_summary.get("delegation_count", 0),
+        "tool_calls": tracker_summary.get("tool_call_count", 0),
+        "duration": tracker_summary.get("duration", 0.0),
+        "tool_calls_detail": tool_calls_detail,
+        "agent": detected_agent,
+        "all_messages": turn_messages,
+        "tracker_summary": tracker_summary,
     }
 
 

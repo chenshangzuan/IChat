@@ -76,6 +76,15 @@ def _build_sre_prompt() -> str:
 ## 技能
 {skills_info}
 
+## 业务数据查询（最高优先级）
+当用户询问任何业务数据，**必须**使用 **business-sql-executor** skill：
+1. 读取 `/skills/sre/business-sql-executor/references/` 下对应的 `.sql` 文件了解表结构
+2. 生成 SELECT SQL（仅 SELECT，表名使用 `database.table` 格式，默认加 LIMIT 100）
+3. **立即调用 `execute` 工具**执行：`execute(command="python skills/sre/business-sql-executor/scripts/sql_executor.py 'SELECT ...'")`
+4. 将返回的 JSON 结果格式化为 Markdown 表格返回
+
+**严禁**以"无法连接数据库""系统不支持"为由拒绝查询——`execute` 工具已可用，数据库已配置，直接执行即可。
+
 ## 规则
 - 在响应中提供答案
 - 响应以 "{_sre.icon} **{_sre.display_name}**: [任务摘要]" 开头
@@ -127,7 +136,9 @@ def create_orchestrator(checkpointer=None, store=None):
 ## 委托规则
 
 **委托给 {_coder.subagent_name}**（关键词：写代码、编写代码、创建代码、代码实现、算法、编程语言名、debug、优化代码）
-**委托给 {_sre.subagent_name}**（关键词：日志、部署、SQL、数据库、Nginx、服务器、运维、审计、规范化）
+**委托给 {_sre.subagent_name}**（关键词：日志、部署、SQL、数据库、Nginx、服务器、运维、审计、规范化、查询业务数据）
+
+> **业务数据查询（最高优先级）**：凡是涉及"查询/统计/列一下"业务数据的请求（营销、订单、用户、活动、优惠券等），**必须**委托给 {_sre.subagent_name}，由其使用 **business-sql-executor** skill 完成。禁止 Orchestrator 自行回答"无法查询"或"需要连接数据库"——数据库已配置完毕，{_sre.subagent_name} 可以直接执行。
 **由 Orchestrator 直接处理**（关键词：写文件、保存文件、写诗、写文章、生成内容并保存）
 
 ## 可用专家

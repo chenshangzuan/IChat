@@ -89,6 +89,7 @@ class SessionManager:
         # 构建基础配置
         config_dict = {
             "configurable": {"thread_id": thread_id},
+            "recursion_limit": 100,
         }
 
         # Langfuse追踪
@@ -116,7 +117,7 @@ class SessionManager:
         # 构建基础配置
         config_dict = {
             "configurable": {"thread_id": thread_id},
-            "recursion_limit": 15  # 限制工具调用循环次数，防止无限循环和重复调用
+            "recursion_limit": 100  # 每次工具调用占 2 步，skill 工作流（读文件+执行）需要更多步数
         }
 
         # Langfuse追踪

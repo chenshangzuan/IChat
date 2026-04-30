@@ -1,0 +1,43 @@
+-- 营销系统 (Marketing System) 核心表结构，db=marketingcenter
+-- 请将以下模板替换为实际的表结构 DDL
+
+-- 营销优惠表
+CREATE TABLE `mc_preferential_new` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `uid` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `promotion_uid` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '推广活动唯一键',
+  `internal_name` varchar(125) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '内部名称',
+  `external_name` varchar(125) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '外部名称',
+  `remarks` varchar(300) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '备注',
+  `level` int(11) DEFAULT '0' COMMENT '优先级',
+  `distribution_type` tinyint(4) DEFAULT NULL COMMENT '分配类型：0:手动 1:自动',
+  `distribution_restrictions` json DEFAULT NULL COMMENT '发放限制',
+  `distribution_amount` decimal(10,0) DEFAULT NULL COMMENT '发放数量',
+  `distribution_status` tinyint(4) DEFAULT NULL COMMENT '分发状态：0-未分发，1-已分发',
+  `all_amount` decimal(10,0) DEFAULT NULL COMMENT '总数量',
+  `start_time` datetime DEFAULT NULL COMMENT '生效时间',
+  `end_time` datetime DEFAULT NULL COMMENT '失效时间',
+  `lifecycle` int(10) DEFAULT NULL COMMENT '实体券生效周期',
+  `pay_type` tinyint(4) DEFAULT NULL COMMENT '支付方式（0:后付费 1-预付费）',
+  `type` int(11) DEFAULT NULL COMMENT '0:折扣、1:优惠卷',
+  `discount_type` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '折扣类型',
+  `source` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT 'PLATFORM' COMMENT '来源',
+  `status` int(11) DEFAULT NULL COMMENT '0:生效，1：未生效',
+  `scene` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT 'MARKET_ACTIVITY',
+  `market_activity_type` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT 'NORMAL' COMMENT '市场活动类型',
+  `poster_positions` int(11) DEFAULT NULL COMMENT '海报位置Bitmap',
+  `poster_style` text COLLATE utf8mb4_unicode_ci COMMENT '海报样式',
+  `tags` text COLLATE utf8mb4_unicode_ci COMMENT '标签',
+  `auxiliary_info` text COLLATE utf8mb4_unicode_ci COMMENT '辅助信息',
+  `effective_condition_snapshot` text COLLATE utf8mb4_unicode_ci COMMENT '生效策略快照',
+  `priority` int(11) DEFAULT NULL COMMENT '优先级',
+  `preferential_strength` decimal(10,3) DEFAULT NULL COMMENT '优惠力度',
+  `preferential_strength_name` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '优惠力度名称',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `creator` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '创建人',
+  `last_modify_user` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '最后编辑人',
+  `del` tinyint(1) DEFAULT '0',
+  PRIMARY KEY (`id`),
+  KEY `idx_uid` (`uid`)
+) ENGINE=InnoDB AUTO_INCREMENT=10628 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci

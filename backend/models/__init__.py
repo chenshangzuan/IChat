@@ -111,7 +111,25 @@ class ZhipuChatModel(BaseChatModel):
             if msg.type == "human":
                 formatted.append({"role": "user", "content": msg.content})
             elif msg.type == "ai":
-                formatted.append({"role": "assistant", "content": msg.content})
+                msg_dict: dict = {"role": "assistant", "content": msg.content or ""}
+                tool_calls = getattr(msg, "tool_calls", None)
+                if tool_calls:
+                    # 工具调用消息必须携带 tool_calls 字段，否则后续 tool 消息无法与之匹配
+                    msg_dict["tool_calls"] = [
+                        {
+                            "id": (tc.get("id", "") if isinstance(tc, dict) else getattr(tc, "id", "")),
+                            "type": "function",
+                            "function": {
+                                "name": (tc.get("name", "") if isinstance(tc, dict) else getattr(tc, "name", "")),
+                                "arguments": json.dumps(
+                                    tc.get("args", {}) if isinstance(tc, dict) else getattr(tc, "args", {}),
+                                    ensure_ascii=False,
+                                ),
+                            },
+                        }
+                        for tc in tool_calls
+                    ]
+                formatted.append(msg_dict)
             elif msg.type == "system":
                 formatted.append({"role": "system", "content": msg.content})
             elif msg.type == "tool":
